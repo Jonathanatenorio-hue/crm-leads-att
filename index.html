@@ -231,7 +231,7 @@ tbody tr:hover{background:#F7F8FF}
   <div class="main">
     <div class="page-head">
       <div>
-        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard">Dashboard</button></div>
+        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Asignar</button></div>
         <h1 id="pageTitle">Mi cartera</h1><div class="ph-sub" id="cartSub">Tus leads de campañas de WhatsApp</div>
       </div>
       <button class="btn btn-primary" id="btnNuevo">+ Nuevo lead</button>
@@ -268,6 +268,34 @@ tbody tr:hover{background:#F7F8FF}
     </div>
     </div><!-- /opSection -->
     <div id="dashboard" class="hidden"></div>
+    <div id="asignarSection" class="hidden">
+      <div class="dash-grid">
+        <div class="dash-card">
+          <h3>Asignar leads a un agente</h3>
+          <div class="dc-sub">Pega los números (uno por línea, en cualquier formato de iVentas). Se crean asignados y listos para que el agente los complete.</div>
+          <div class="field"><label>Agente</label><select id="asAgente"><option value="">Selecciona…</option></select></div>
+          <div class="field"><label>Campaña</label><select id="asCampana"><option value="">Selecciona…</option></select></div>
+          <div class="field"><label>Estado inicial</label><select id="asEstado">
+            <option value="">Sin evaluar (lo evalúa el agente)</option>
+            <option value="adeudo">No viable — Adeudo</option>
+            <option value="renovo">No viable — Ya renovó</option>
+          </select></div>
+          <div class="field"><label>Números</label><textarea id="asNumeros" rows="6" placeholder="+521 55 1234 5678&#10;https://wa.me/5215587654321&#10;5544332211"></textarea></div>
+          <button class="btn btn-primary" id="btnAsignar">Asignar leads</button>
+          <div class="dash-empty" id="asInfo" style="margin-top:10px"></div>
+        </div>
+        <div class="dash-card">
+          <h3>Registrar rechazos</h3>
+          <div class="dc-sub">No llegan a ningún agente, pero cuentan como calidad de base. Solo tras verificar en AT&amp;T.</div>
+          <div class="field"><label>Campaña</label><select id="rzCampana"><option value="">Selecciona…</option></select></div>
+          <div class="field"><label>Motivo de rechazo</label><select id="rzMotivo"><option value="">Selecciona…</option></select></div>
+          <label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="rzVerif" style="width:auto"> Verificado en plataforma AT&amp;T</label>
+          <div class="field"><label>Números</label><textarea id="rzNumeros" rows="6" placeholder="Números rechazados…"></textarea></div>
+          <button class="btn btn-primary" id="btnRechazos">Registrar rechazos</button>
+          <div class="dash-empty" id="rzInfo" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -442,7 +470,14 @@ async function entrarApp(session){
   $('uName').textContent=agente.nombre;
   $('uRole').textContent=agente.rol==='director'?'Director':(agente.rol==='supervisor'?'Supervisor':'Agente')+(agente.supervisores?.nombre?' · '+agente.supervisores.nombre:'');
   $('uAvatar').textContent=iniciales(agente.nombre);
-  if(agente.rol!=='agente'){$('cartSub').textContent='Vista '+agente.rol+' · todos los leads';$('pageTitle').textContent=agente.rol==='director'?'Todos los leads':'Cartera del equipo';show($('sectabs'));}
+  if(agente.rol!=='agente'){
+    $('cartSub').textContent='Vista '+agente.rol+' · todos los leads';
+    $('pageTitle').textContent=agente.rol==='director'?'Todos los leads':(agente.rol==='depurador'?'Asignación de leads':'Cartera del equipo');
+    show($('sectabs'));
+    $('tabDashboard').classList.toggle('hidden',!['director','supervisor'].includes(agente.rol));
+    $('tabAsignar').classList.toggle('hidden',!['director','depurador'].includes(agente.rol));
+    if(['director','depurador'].includes(agente.rol)) cargarSelectsAsignar();
+  }
   hide($('boot'));hide($('login'));show($('app'));
   await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads()]);
   buildEtapas();
@@ -730,8 +765,58 @@ function setSeccion(s){
   $('sectabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
   $('opSection').classList.toggle('hidden',s!=='operacion');
   $('dashboard').classList.toggle('hidden',s!=='dashboard');
+  $('asignarSection').classList.toggle('hidden',s!=='asignar');
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
+}
+async function cargarSelectsAsignar(){
+  const {data:ags}=await db.from('agentes').select('id,nombre').eq('rol','agente').eq('activo',true).order('nombre');
+  const oa=(ags||[]).map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
+  $('asAgente').innerHTML='<option value="">Selecciona…</option>'+oa;
+  const oc=CAMPANAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  $('asCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
+  $('rzCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
+  const {data:mr}=await db.from('motivos_rechazo').select('id,nombre').order('orden');
+  $('rzMotivo').innerHTML='<option value="">Selecciona…</option>'+(mr||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join('');
+}
+function parseNums(txt){
+  const set=new Set();
+  (txt||'').split(/[\n,;\s]+/).forEach(p=>{const t=tel10(p);if(t.length===10)set.add(t);});
+  return [...set];
+}
+async function asignarLeads(){
+  const agente_id=$('asAgente').value, campana_id=$('asCampana').value, estado=$('asEstado').value;
+  if(!agente_id||!campana_id)return toast('Elige agente y campaña',false);
+  const nums=parseNums($('asNumeros').value);
+  if(nums.length===0)return toast('Pega al menos un número válido',false);
+  const btn=$('btnAsignar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  const {data:ex}=await db.from('leads').select('tel10').in('tel10',nums);
+  const existSet=new Set((ex||[]).map(x=>x.tel10));
+  const nuevos=nums.filter(t=>!existSet.has(t));
+  const base={campana_id,agente_id:parseInt(agente_id),registrado_por:'depurador'};
+  if(estado==='adeudo'){base.adeudo='Sí';}
+  if(estado==='renovo'){base.renovable='No';base.adeudo='No';}
+  let creados=0;
+  if(nuevos.length){const {error}=await db.from('leads').insert(nuevos.map(t=>({...base,telefono:t})));if(error){btn.disabled=false;btn.textContent='Asignar leads';return toast('Error: '+error.message,false);}creados=nuevos.length;}
+  btn.disabled=false;btn.textContent='Asignar leads';
+  $('asInfo').innerHTML=`<span class="telok">✓ ${creados} leads asignados</span>${existSet.size?` · ${existSet.size} ya existían (omitidos)`:''}`;
+  $('asNumeros').value='';
+  toast(creados+' leads asignados');
+  if(vista!==undefined) await cargarLeads();
+}
+async function registrarRechazos(){
+  const campana_id=$('rzCampana').value, motivo_id=$('rzMotivo').value, verif=$('rzVerif').checked;
+  if(!campana_id||!motivo_id)return toast('Elige campaña y motivo',false);
+  const nums=parseNums($('rzNumeros').value);
+  if(nums.length===0)return toast('Pega al menos un número',false);
+  const btn=$('btnRechazos');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  const objs=nums.map(t=>({telefono:t,campana_id,motivo_id:parseInt(motivo_id),verificado_att:verif,registrado_por:AGENTE.id}));
+  const {error}=await db.from('rechazos').insert(objs);
+  btn.disabled=false;btn.textContent='Registrar rechazos';
+  if(error)return toast('Error: '+error.message,false);
+  $('rzInfo').innerHTML=`<span class="telok">✓ ${nums.length} rechazos registrados</span>`;
+  $('rzNumeros').value='';$('rzVerif').checked=false;
+  toast(nums.length+' rechazos registrados');
 }
 function barRow(label,val,max,color){
   const w=max>0?Math.round(val/max*100):0;
@@ -829,6 +914,8 @@ $('btnLogout').onclick=async()=>{await db.auth.signOut();location.reload();};
 $('btnNuevo').onclick=()=>abrirDrawer(null);
 $('viewswitch').querySelectorAll('button').forEach(b=>b.onclick=()=>setVista(b.dataset.v));
 $('sectabs').querySelectorAll('button').forEach(b=>b.onclick=()=>setSeccion(b.dataset.s));
+$('btnAsignar').onclick=asignarLeads;
+$('btnRechazos').onclick=registrarRechazos;
 document.addEventListener('change',e=>{if(e.target.id==='recEtapa')actualizarRecInfo();});
 $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
 $('drSave').onclick=guardar;
