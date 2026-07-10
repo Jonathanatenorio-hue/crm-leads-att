@@ -284,14 +284,15 @@ tbody tr:hover{background:#F7F8FF}
           <div id="cargaResultado" style="margin-top:16px"></div>
         </div>
         <div class="dash-card">
-          <h3>Registrar rechazos</h3>
-          <div class="dc-sub">No llegan a ningún agente, pero cuentan como calidad de base. Solo tras verificar en AT&amp;T.</div>
-          <div class="field"><label>Campaña</label><select id="rzCampana"><option value="">Selecciona…</option></select></div>
-          <div class="field"><label>Motivo de rechazo</label><select id="rzMotivo"><option value="">Selecciona…</option></select></div>
-          <div id="rzVerifWrap" class="hidden"><label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="rzVerif" style="width:auto"> Verificado en plataforma AT&amp;T <span style="color:var(--red)">*</span></label></div>
-          <div class="field"><label>Números</label><textarea id="rzNumeros" rows="6" placeholder="Números rechazados…"></textarea></div>
-          <button class="btn btn-primary" id="btnRechazos">Registrar rechazos</button>
-          <div class="dash-empty" id="rzInfo" style="margin-top:10px"></div>
+          <h3>Carga de rechazos</h3>
+          <div class="dc-sub">Sube el Excel de rechazos del día (Campaña, Fecha, Número, Motivo). No llegan a ningún agente; miden la calidad de cada base.</div>
+          <div class="filerow" style="margin-bottom:14px">
+            <label class="filebtn" for="rzFile">📄 Elegir Excel de rechazos</label>
+            <input id="rzFile" type="file" accept=".xlsx,.xls" class="hidden">
+            <span class="fileok hidden" id="rzFileName"></span>
+          </div>
+          <button class="btn btn-primary" id="btnRechazos" disabled>Procesar rechazos</button>
+          <div id="rzInfo" style="margin-top:16px"></div>
         </div>
       </div>
     </div>
@@ -778,7 +779,7 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
-let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], cargaFilas=null;
+let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, cargaFilas=null, rzFilas=null;
 // Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
 function resolverAgente(txt){
   const q=norm(txt);
@@ -805,10 +806,8 @@ async function cargarSelectsAsignar(){
   AGENTES_LISTA=(ags||[]).map(a=>({id:a.id,nombre:a.nombre,n:norm(a.nombre)}));
   AGENTES_MAP={};AGENTES_LISTA.forEach(a=>AGENTES_MAP[a.n]=a.id);
   CAMP_MAP={};CAMPANAS.forEach(c=>CAMP_MAP[norm(c.nombre)]=c.id);
-  const oc=CAMPANAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
-  $('rzCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
   const {data:mr}=await db.from('motivos_rechazo').select('id,nombre').order('orden');
-  $('rzMotivo').innerHTML='<option value="">Selecciona…</option>'+(mr||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join('');
+  MOTIVOS_MAP={};(mr||[]).forEach(m=>MOTIVOS_MAP[norm(m.nombre)]=m.id);
 }
 function leerExcel(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];res(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));}catch(err){rej(err);}};r.onerror=rej;r.readAsArrayBuffer(file);});}
 function mapearColumnas(rows){
@@ -871,22 +870,35 @@ function parseNums(txt){
   (txt||'').split(/[\n,;\s]+/).forEach(p=>{const t=tel10(p);if(t.length===10)set.add(t);});
   return [...set];
 }
-async function registrarRechazos(){
-  const campana_id=$('rzCampana').value, motivo_id=$('rzMotivo').value, verif=$('rzVerif').checked;
-  if(!campana_id||!motivo_id)return toast('Elige campaña y motivo',false);
-  const motivoTxt=$('rzMotivo').selectedOptions[0].textContent;
-  const requiereVerif=/renov|no est/i.test(motivoTxt);
-  if(requiereVerif && !verif)return toast('Este motivo requiere verificación en AT&T',false);
-  const nums=parseNums($('rzNumeros').value);
-  if(nums.length===0)return toast('Pega al menos un número',false);
+function mapearRechazos(rows){
+  let hi=-1;
+  for(let i=0;i<Math.min(rows.length,10);i++){const j=rows[i].map(x=>norm(x)).join('|');if((j.includes('numero')||j.includes('tel'))&&j.includes('motivo')){hi=i;break;}}
+  if(hi<0)return null;
+  const H=rows[hi].map(x=>norm(x));
+  const idx={campana:H.findIndex(h=>h.includes('campa')),fecha:H.findIndex(h=>h.includes('fecha')),tel:H.findIndex(h=>h.includes('numero')||h.includes('tel')),motivo:H.findIndex(h=>h.includes('motivo'))};
+  const datos=[];
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i];const t=tel10(String(r[idx.tel]||''));if(t.length!==10)continue;
+    datos.push({campana:String(r[idx.campana]||'').trim(),fecha:idx.fecha>=0?r[idx.fecha]:'',tel10:t,motivo:String(r[idx.motivo]||'').trim()});}
+  return datos;
+}
+async function procesarRechazos(){
+  if(!rzFilas)return toast('Elige un archivo primero',false);
   const btn=$('btnRechazos');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
-  const objs=nums.map(t=>({telefono:t,campana_id,motivo_id:parseInt(motivo_id),verificado_att:verif,registrado_por:AGENTE.id}));
-  const {error}=await db.from('rechazos').insert(objs);
-  btn.disabled=false;btn.textContent='Registrar rechazos';
-  if(error)return toast('Error: '+error.message,false);
-  $('rzInfo').innerHTML=`<span class="telok">✓ ${nums.length} rechazos registrados</span>`;
-  $('rzNumeros').value='';$('rzVerif').checked=false;$('rzVerifWrap').classList.add('hidden');$('rzMotivo').value='';
-  toast(nums.length+' rechazos registrados');
+  const res=$('rzInfo');res.innerHTML='';
+  const datos=mapearRechazos(rzFilas);
+  if(!datos||datos.length===0){btn.disabled=false;btn.textContent='Procesar rechazos';res.innerHTML='<div class="dash-empty" style="color:var(--red)">No encontré filas válidas. Revisa columnas Campaña, Número y Motivo.</div>';return;}
+  const objs=[],noProc=[];
+  datos.forEach(d=>{
+    const cId=CAMP_MAP[norm(d.campana)],mId=MOTIVOS_MAP[norm(d.motivo)];
+    if(!cId){noProc.push('Campaña no reconocida: "'+d.campana+'"');return;}
+    if(!mId){noProc.push('Motivo no reconocido: "'+d.motivo+'"');return;}
+    objs.push({telefono:d.tel10,campana_id:cId,motivo_id:mId,fecha_rechazo:fechaISO(d.fecha),verificado_att:/renov|no est/i.test(d.motivo),registrado_por:AGENTE.id});
+  });
+  let ok=0;
+  if(objs.length){for(let i=0;i<objs.length;i+=200){const {error}=await db.from('rechazos').insert(objs.slice(i,i+200));if(error){btn.disabled=false;btn.textContent='Procesar rechazos';res.innerHTML='<div class="dash-empty" style="color:var(--red)">Error: '+error.message+'</div>';return;}}ok=objs.length;}
+  btn.disabled=false;btn.textContent='Procesar rechazos';
+  res.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap"><div style="background:var(--red-soft);color:var(--red);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${ok} rechazos cargados</div>${noProc.length?`<div style="background:var(--amber-soft);color:var(--amber);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${noProc.length} no procesados</div>`:''}</div>${noProc.length?`<div class="dash-empty" style="margin-top:10px;color:var(--red)">${[...new Set(noProc)].slice(0,5).join(' · ')}</div>`:''}`;
+  toast(ok+' rechazos cargados');
 }
 function barRow(label,val,max,color){
   const w=max>0?Math.round(val/max*100):0;
@@ -984,10 +996,10 @@ $('btnLogout').onclick=async()=>{await db.auth.signOut();location.reload();};
 $('btnNuevo').onclick=()=>abrirDrawer(null);
 $('viewswitch').querySelectorAll('button').forEach(b=>b.onclick=()=>setVista(b.dataset.v));
 $('sectabs').querySelectorAll('button').forEach(b=>b.onclick=()=>setSeccion(b.dataset.s));
-$('btnRechazos').onclick=registrarRechazos;
+$('btnRechazos').onclick=procesarRechazos;
 $('cargaFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('cargaFileName').textContent='📄 '+f.name;show($('cargaFileName'));try{cargaFilas=await leerExcel(f);$('btnCargar').disabled=false;}catch(err){toast('No pude leer el Excel',false);}});
 $('btnCargar').onclick=procesarCarga;
-$('rzMotivo').addEventListener('change',e=>{const t=e.target.selectedOptions[0].textContent;$('rzVerifWrap').classList.toggle('hidden',!/renov|no est/i.test(t));});
+$('rzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('rzFileName').textContent='📄 '+f.name;show($('rzFileName'));try{rzFilas=await leerExcel(f);$('btnRechazos').disabled=false;}catch(err){toast('No pude leer el Excel',false);}});
 document.addEventListener('change',e=>{if(e.target.id==='recEtapa')actualizarRecInfo();});
 $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
 $('drSave').onclick=guardar;
