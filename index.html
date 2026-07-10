@@ -1088,8 +1088,8 @@ async function renderDashboard(){
   const rech=RECHAZOS.length;
   const conv=viab?Math.round(vent/viab*100):0;
   const tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
-  const ETS=['Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído'];
-  const ECOL={'Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
+  const ETS=['Inicio de negociación','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído'];
+  const ECOL={'Inicio de negociación':'#64748B','Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
   const porEtapa=ETS.map(e=>({e,n:LEADS.filter(l=>l.etapa===e).length}));
   // agentes
   const pa={};LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';(pa[n]=pa[n]||{v:0,vt:0});if(l.viabilidad==='VIABLE')pa[n].v++;if(l.etapa==='Venta exitosa')pa[n].vt++;});
@@ -1135,6 +1135,7 @@ async function renderDashboard(){
         <button class="btn btn-ghost" id="btnExportTabla">⬇ Exportar Excel</button></div>
       <div class="tbltabs" id="tbltabs">
         <button data-t="agente" class="on">Resumen por agente</button>
+        <button data-t="dia">Leads por día</button>
         <button data-t="embudo">Embudo por agente</button>
         <button data-t="campana">Por campaña</button>
         <button data-t="global">Embudo global</button>
@@ -1145,7 +1146,7 @@ async function renderDashboard(){
       ${parados.length?parados.map(l=>{const h=Math.round((ahora-new Date(l.ultimo_movimiento).getTime())/36e5);return `<div class="alert-row"><div><span class="al-tel">${l.telefono}</span> <span class="al-nom">${l.nombre||''} · ${l.etapa}${ES_STAFF&&l.agentes?.nombre?' · '+l.agentes.nombre:''}</span></div><span class="al-h">${h}h sin mover</span></div>`;}).join(''):'<div class="dash-empty">Todo con seguimiento al día. 🎉</div>'}</div>
     <div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
-        <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
+        <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
         <button class="btn btn-primary" id="btnReciclar">Extraer y marcar reciclado</button>
       </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`;
 
@@ -1208,6 +1209,23 @@ const ETAPAS_CRM=['Venta exitosa','Cotización enviada','Aceleración pendiente'
 function pc(n,d){return d>0?Math.round(n/d*100)+'%':'0%';}
 function money(n){return '$'+(n||0).toLocaleString('es-MX',{maximumFractionDigits:0});}
 
+function tablaPorDia(){
+  const NDIAS=7;
+  const dias=[];for(let i=NDIAS-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dias.push(d.toISOString().slice(0,10));}
+  const et=(iso)=>{const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('es-MX',{weekday:'short',day:'2-digit',month:'short'});};
+  const A={};
+  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{dias:Object.fromEntries(dias.map(d=>[d,0])),total:0};
+    const f=(l.creado_en||'').slice(0,10);
+    if(a.dias[f]!==undefined){a.dias[f]++;a.total++;}});
+  const rows=Object.entries(A).filter(([,o])=>o.total>0)
+    .map(([n,o])=>[n,...dias.map(d=>o.dias[d]||''),o.total])
+    .sort((a,b)=>b[b.length-1]-a[a.length-1]);
+  const tot=['TOTAL',...dias.map(d=>Object.values(A).reduce((s,o)=>s+(o.dias[d]||0),0)),Object.values(A).reduce((s,o)=>s+o.total,0)];
+  const headers=['Agente',...dias.map(et),'Total 7d'];
+  LAST_TABLA={headers,rows:[...rows,tot],name:'Leads_por_dia'};
+  if(rows.length===0)return '<div class="dash-empty">Sin leads registrados en los últimos '+NDIAS+' días.</div>';
+  return render_atable(headers,rows,tot);
+}
 function tablaAgente(){
   const A={};
   LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
@@ -1316,6 +1334,7 @@ function renderTablas(which){
   $('tbltabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.t===which));
   const c=$('tablaCont');
   if(which==='agente')c.innerHTML=tablaAgente();
+  else if(which==='dia')c.innerHTML=tablaPorDia();
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
   else if(which==='campana')c.innerHTML=tablaCampana();
   else c.innerHTML=tablaGlobal();
