@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#F5F6F8;--surface:#FFFFFF;--line:#E6E8EC;--line2:#EEF0F3;
@@ -231,7 +232,7 @@ tbody tr:hover{background:#F7F8FF}
   <div class="main">
     <div class="page-head">
       <div>
-        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Asignar</button></div>
+        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Carga del día</button></div>
         <h1 id="pageTitle">Mi cartera</h1><div class="ph-sub" id="cartSub">Tus leads de campañas de WhatsApp</div>
       </div>
       <button class="btn btn-primary" id="btnNuevo">+ Nuevo lead</button>
@@ -271,25 +272,22 @@ tbody tr:hover{background:#F7F8FF}
     <div id="asignarSection" class="hidden">
       <div class="dash-grid">
         <div class="dash-card">
-          <h3>Asignar leads a un agente</h3>
-          <div class="dc-sub">Pega los números (uno por línea, en cualquier formato de iVentas). Se crean asignados y listos para que el agente los complete.</div>
-          <div class="field"><label>Agente</label><select id="asAgente"><option value="">Selecciona…</option></select></div>
-          <div class="field"><label>Campaña</label><select id="asCampana"><option value="">Selecciona…</option></select></div>
-          <div class="field"><label>Estado inicial</label><select id="asEstado">
-            <option value="">Sin evaluar (lo evalúa el agente)</option>
-            <option value="adeudo">No viable — Adeudo</option>
-            <option value="renovo">No viable — Ya renovó</option>
-          </select></div>
-          <div class="field"><label>Números</label><textarea id="asNumeros" rows="6" placeholder="+521 55 1234 5678&#10;https://wa.me/5215587654321&#10;5544332211"></textarea></div>
-          <button class="btn btn-primary" id="btnAsignar">Asignar leads</button>
-          <div class="dash-empty" id="asInfo" style="margin-top:10px"></div>
+          <h3>Carga del día · asignación + conciliación</h3>
+          <div class="dc-sub">Sube el Excel del depurador (Campaña, Agente, Teléfono + viabilidad opcional). Crea los leads que falten, no duplica los ya registrados y te da el cumplimiento por agente.</div>
+          <div class="filerow" style="margin-bottom:14px">
+            <label class="filebtn" for="cargaFile">📄 Elegir archivo Excel</label>
+            <input id="cargaFile" type="file" accept=".xlsx,.xls" class="hidden">
+            <span class="fileok hidden" id="cargaFileName"></span>
+          </div>
+          <button class="btn btn-primary" id="btnCargar" disabled>Procesar carga</button>
+          <div id="cargaResultado" style="margin-top:16px"></div>
         </div>
         <div class="dash-card">
           <h3>Registrar rechazos</h3>
           <div class="dc-sub">No llegan a ningún agente, pero cuentan como calidad de base. Solo tras verificar en AT&amp;T.</div>
           <div class="field"><label>Campaña</label><select id="rzCampana"><option value="">Selecciona…</option></select></div>
           <div class="field"><label>Motivo de rechazo</label><select id="rzMotivo"><option value="">Selecciona…</option></select></div>
-          <label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="rzVerif" style="width:auto"> Verificado en plataforma AT&amp;T</label>
+          <div id="rzVerifWrap" class="hidden"><label style="display:flex;align-items:center;gap:9px;font-size:13px;margin-bottom:14px;cursor:pointer"><input type="checkbox" id="rzVerif" style="width:auto"> Verificado en plataforma AT&amp;T <span style="color:var(--red)">*</span></label></div>
           <div class="field"><label>Números</label><textarea id="rzNumeros" rows="6" placeholder="Números rechazados…"></textarea></div>
           <button class="btn btn-primary" id="btnRechazos">Registrar rechazos</button>
           <div class="dash-empty" id="rzInfo" style="margin-top:10px"></div>
@@ -769,44 +767,82 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
+let AGENTES_MAP={}, CAMP_MAP={}, cargaFilas=null;
+function norm(s){return (s||'').toString().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}
+function fechaISO(v){if(!v)return null;if(v instanceof Date)return v.toISOString().slice(0,10);const s=String(v).trim();const m=s.match(/(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];const d=new Date(s);return isNaN(d)?null:d.toISOString().slice(0,10);}
 async function cargarSelectsAsignar(){
-  const {data:ags}=await db.from('agentes').select('id,nombre').eq('rol','agente').eq('activo',true).order('nombre');
-  const oa=(ags||[]).map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
-  $('asAgente').innerHTML='<option value="">Selecciona…</option>'+oa;
+  const {data:ags}=await db.from('agentes').select('id,nombre').eq('rol','agente').eq('activo',true);
+  AGENTES_MAP={};(ags||[]).forEach(a=>AGENTES_MAP[norm(a.nombre)]=a.id);
+  CAMP_MAP={};CAMPANAS.forEach(c=>CAMP_MAP[norm(c.nombre)]=c.id);
   const oc=CAMPANAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
-  $('asCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
   $('rzCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
   const {data:mr}=await db.from('motivos_rechazo').select('id,nombre').order('orden');
   $('rzMotivo').innerHTML='<option value="">Selecciona…</option>'+(mr||[]).map(m=>`<option value="${m.id}">${m.nombre}</option>`).join('');
+}
+function leerExcel(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];res(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));}catch(err){rej(err);}};r.onerror=rej;r.readAsArrayBuffer(file);});}
+function mapearColumnas(rows){
+  let hi=-1;
+  for(let i=0;i<Math.min(rows.length,10);i++){const j=rows[i].map(x=>norm(x)).join('|');if(j.includes('telefono')&&(j.includes('campa')||j.includes('agente'))){hi=i;break;}}
+  if(hi<0)return null;
+  const H=rows[hi].map(x=>norm(x));
+  const idx={campana:H.findIndex(h=>h.includes('campa')),agente:H.findIndex(h=>h.includes('agente')),tel:H.findIndex(h=>h.includes('tel')),adeudo:H.findIndex(h=>h.includes('adeudo')),monto:H.findIndex(h=>h.includes('monto')),renovar:H.findIndex(h=>h.includes('renovar')),fecha:H.findIndex(h=>h.includes('fecha'))};
+  const datos=[];
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i];const t=tel10(String(r[idx.tel]||''));if(t.length!==10)continue;
+    datos.push({campana:String(r[idx.campana]||'').trim(),agente:String(r[idx.agente]||'').trim(),tel10:t,
+      adeudo:idx.adeudo>=0?String(r[idx.adeudo]||'').trim():'',monto:idx.monto>=0?r[idx.monto]:'',
+      renovar:idx.renovar>=0?String(r[idx.renovar]||'').trim():'',fecha:idx.fecha>=0?r[idx.fecha]:''});}
+  return datos;
+}
+async function procesarCarga(){
+  if(!cargaFilas)return toast('Elige un archivo primero',false);
+  const btn=$('btnCargar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  const res=$('cargaResultado');res.innerHTML='';
+  const datos=mapearColumnas(cargaFilas);
+  if(!datos||datos.length===0){btn.disabled=false;btn.textContent='Procesar carga';res.innerHTML='<div class="dash-empty" style="color:var(--red)">No encontré filas válidas. Revisa las columnas Campaña, Agente y Teléfono.</div>';return;}
+  const tels=[...new Set(datos.map(d=>d.tel10))];
+  let existentes=new Set();
+  for(let i=0;i<tels.length;i+=500){const {data}=await db.from('leads').select('tel10').in('tel10',tels.slice(i,i+500));(data||[]).forEach(x=>existentes.add(x.tel10));}
+  const porAgente={},noProc=[],nuevos=[],hoy=new Set();
+  datos.forEach(d=>{
+    const aId=AGENTES_MAP[norm(d.agente)],cId=CAMP_MAP[norm(d.campana)];
+    if(!aId||!cId){noProc.push({...d,motivo:!aId?'Agente no reconocido':'Campaña no reconocida'});return;}
+    (porAgente[d.agente]=porAgente[d.agente]||{recibidos:0,yaReg:0,creados:0}).recibidos++;
+    if(existentes.has(d.tel10)||hoy.has(d.tel10)){porAgente[d.agente].yaReg++;return;}
+    hoy.add(d.tel10);
+    const o={campana_id:cId,agente_id:aId,telefono:d.tel10,registrado_por:'conciliacion',sin_registrar:true};
+    if(/^s[i\u00ed]/i.test(d.adeudo)){o.adeudo='Sí';if(parseFloat(d.monto)>0)o.monto_adeudo=parseFloat(d.monto);}
+    else if(/^no/i.test(d.adeudo))o.adeudo='No';
+    if(/^s[i\u00ed]/i.test(d.renovar))o.renovable='Sí';
+    else if(/^no/i.test(d.renovar)){o.renovable='No';const f=fechaISO(d.fecha);if(f)o.fecha_renovo=f;}
+    nuevos.push(o);porAgente[d.agente].creados++;
+  });
+  if(nuevos.length){for(let i=0;i<nuevos.length;i+=200){const {error}=await db.from('leads').insert(nuevos.slice(i,i+200));if(error){btn.disabled=false;btn.textContent='Procesar carga';res.innerHTML='<div class="dash-empty" style="color:var(--red)">Error: '+error.message+'</div>';return;}}}
+  db.from('conciliaciones').insert({total_asignados:datos.length,ya_registrados:datos.length-nuevos.length,creados_faltantes:nuevos.length,ejecutado_por:AGENTE.id}).then(()=>{},()=>{});
+  btn.disabled=false;btn.textContent='Procesar carga';
+  const filas=Object.entries(porAgente).sort((a,b)=>b[1].creados-a[1].creados).map(([ag,o])=>{
+    const cum=o.recibidos?Math.round(o.yaReg/o.recibidos*100):0;const col=cum>=90?'var(--green)':(cum>=70?'var(--amber)':'var(--red)');
+    return `<tr><td style="font-weight:600">${ag}</td><td style="text-align:right">${o.recibidos}</td><td style="text-align:right;color:var(--green)">${o.yaReg}</td><td style="text-align:right;color:var(--amber)">${o.creados}</td><td style="text-align:right;font-weight:700;color:${col}">${cum}%</td></tr>`;}).join('');
+  res.innerHTML=`<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="background:var(--brand-soft);color:var(--brand-dark);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${datos.length} en el archivo</div>
+      <div style="background:var(--green-soft);color:var(--green);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${datos.length-nuevos.length} ya registrados</div>
+      <div style="background:var(--amber-soft);color:var(--amber);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${nuevos.length} creados</div>
+      ${noProc.length?`<div style="background:var(--red-soft);color:var(--red);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${noProc.length} no procesados</div>`:''}</div>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Agente</th><th style="text-align:right">Recibidos</th><th style="text-align:right">Registró</th><th style="text-align:right">Faltaron</th><th style="text-align:right">Cumplió</th></tr></thead><tbody>${filas}</tbody></table></div>
+    ${noProc.length?`<div class="dash-empty" style="margin-top:10px;color:var(--red)">Revisa nombres: ${[...new Set(noProc.map(n=>n.motivo+' → '+(n.agente||n.campana)))].slice(0,6).join(' · ')}</div>`:''}`;
+  toast(nuevos.length+' creados · '+(datos.length-nuevos.length)+' ya estaban');
+  await cargarLeads();
 }
 function parseNums(txt){
   const set=new Set();
   (txt||'').split(/[\n,;\s]+/).forEach(p=>{const t=tel10(p);if(t.length===10)set.add(t);});
   return [...set];
 }
-async function asignarLeads(){
-  const agente_id=$('asAgente').value, campana_id=$('asCampana').value, estado=$('asEstado').value;
-  if(!agente_id||!campana_id)return toast('Elige agente y campaña',false);
-  const nums=parseNums($('asNumeros').value);
-  if(nums.length===0)return toast('Pega al menos un número válido',false);
-  const btn=$('btnAsignar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
-  const {data:ex}=await db.from('leads').select('tel10').in('tel10',nums);
-  const existSet=new Set((ex||[]).map(x=>x.tel10));
-  const nuevos=nums.filter(t=>!existSet.has(t));
-  const base={campana_id,agente_id:parseInt(agente_id),registrado_por:'depurador'};
-  if(estado==='adeudo'){base.adeudo='Sí';}
-  if(estado==='renovo'){base.renovable='No';base.adeudo='No';}
-  let creados=0;
-  if(nuevos.length){const {error}=await db.from('leads').insert(nuevos.map(t=>({...base,telefono:t})));if(error){btn.disabled=false;btn.textContent='Asignar leads';return toast('Error: '+error.message,false);}creados=nuevos.length;}
-  btn.disabled=false;btn.textContent='Asignar leads';
-  $('asInfo').innerHTML=`<span class="telok">✓ ${creados} leads asignados</span>${existSet.size?` · ${existSet.size} ya existían (omitidos)`:''}`;
-  $('asNumeros').value='';
-  toast(creados+' leads asignados');
-  if(vista!==undefined) await cargarLeads();
-}
 async function registrarRechazos(){
   const campana_id=$('rzCampana').value, motivo_id=$('rzMotivo').value, verif=$('rzVerif').checked;
   if(!campana_id||!motivo_id)return toast('Elige campaña y motivo',false);
+  const motivoTxt=$('rzMotivo').selectedOptions[0].textContent;
+  const requiereVerif=/renov|no est/i.test(motivoTxt);
+  if(requiereVerif && !verif)return toast('Este motivo requiere verificación en AT&T',false);
   const nums=parseNums($('rzNumeros').value);
   if(nums.length===0)return toast('Pega al menos un número',false);
   const btn=$('btnRechazos');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
@@ -815,7 +851,7 @@ async function registrarRechazos(){
   btn.disabled=false;btn.textContent='Registrar rechazos';
   if(error)return toast('Error: '+error.message,false);
   $('rzInfo').innerHTML=`<span class="telok">✓ ${nums.length} rechazos registrados</span>`;
-  $('rzNumeros').value='';$('rzVerif').checked=false;
+  $('rzNumeros').value='';$('rzVerif').checked=false;$('rzVerifWrap').classList.add('hidden');$('rzMotivo').value='';
   toast(nums.length+' rechazos registrados');
 }
 function barRow(label,val,max,color){
@@ -914,8 +950,10 @@ $('btnLogout').onclick=async()=>{await db.auth.signOut();location.reload();};
 $('btnNuevo').onclick=()=>abrirDrawer(null);
 $('viewswitch').querySelectorAll('button').forEach(b=>b.onclick=()=>setVista(b.dataset.v));
 $('sectabs').querySelectorAll('button').forEach(b=>b.onclick=()=>setSeccion(b.dataset.s));
-$('btnAsignar').onclick=asignarLeads;
 $('btnRechazos').onclick=registrarRechazos;
+$('cargaFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('cargaFileName').textContent='📄 '+f.name;show($('cargaFileName'));try{cargaFilas=await leerExcel(f);$('btnCargar').disabled=false;}catch(err){toast('No pude leer el Excel',false);}});
+$('btnCargar').onclick=procesarCarga;
+$('rzMotivo').addEventListener('change',e=>{const t=e.target.selectedOptions[0].textContent;$('rzVerifWrap').classList.toggle('hidden',!/renov|no est/i.test(t));});
 document.addEventListener('change',e=>{if(e.target.id==='recEtapa')actualizarRecInfo();});
 $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
 $('drSave').onclick=guardar;
