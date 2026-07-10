@@ -1080,6 +1080,64 @@ async function cargarRechazos(){
   const {data}=await db.from('rechazos').select('campana_id, motivo_id, creado_en, campanas(nombre), motivos_rechazo(nombre)');
   RECHAZOS=data||[];
 }
+// ===== ASISTENTE IA =====
+let CHAT=[];
+function resumenCRM(){
+  const dia=x=>(x||'').slice(0,10);
+  const hoy=new Date().toISOString().slice(0,10);
+  const porAgente={},porDia={},porCamp={},agDia={};
+  LEADS.forEach(l=>{
+    const ag=l.agentes?.nombre||'—',d=dia(l.creado_en),cp=l.campanas?.nombre||'—';
+    const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
+    A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
+    const D=porDia[d]=porDia[d]||{leads:0,viables:0,ventas:0};D.leads++;if(l.viabilidad==='VIABLE')D.viables++;if(l.etapa==='Venta exitosa')D.ventas++;
+    const C=porCamp[cp]=porCamp[cp]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0};C.leads++;if(l.viabilidad==='VIABLE')C.viables++;if(l.etapa==='Venta exitosa')C.ventas++;
+    (agDia[d]=agDia[d]||{})[ag]=(agDia[d]?.[ag]||0)+1;});
+  CAMPANAS.forEach(c=>{(porCamp[c.nombre]=porCamp[c.nombre]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0}).enviados=c.mensajes_enviados||0;});
+  (RECHAZOS||[]).forEach(r=>{const cp=r.campanas?.nombre||'—';(porCamp[cp]=porCamp[cp]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0}).rechazos++;});
+  const etapas={};LEADS.forEach(l=>{const e=l.etapa||'sin tipificar';etapas[e]=(etapas[e]||0)+1;});
+  // solo últimos 30 días en las series diarias
+  const dias30=Object.fromEntries(Object.entries(porDia).filter(([d])=>d>=new Date(Date.now()-30*864e5).toISOString().slice(0,10)).sort());
+  const agDia14=Object.fromEntries(Object.entries(agDia).filter(([d])=>d>=new Date(Date.now()-14*864e5).toISOString().slice(0,10)).sort());
+  return {fecha_hoy:hoy,total_leads:LEADS.length,total_rechazos:(RECHAZOS||[]).length,
+    por_etapa:etapas,por_agente:porAgente,por_dia_ultimos_30:dias30,
+    leads_por_agente_por_dia_ultimos_14:agDia14,por_campana:porCamp,
+    nota:'viables=adeudo No y renovable Sí; conversión=ventas/viables; los rechazos pertenecen a campañas, no a agentes'};
+}
+function asistenteHTML(){
+  const chips=['¿De los leads de hoy cuántos son viables?','¿Qué agente tiene mejor conversión?','¿Qué campaña está rindiendo mejor?','¿Quién recibió más leads esta semana?'];
+  return `<div class="dash-card span2" style="margin-bottom:16px"><h3>🤖 Pregúntale a tu CRM</h3>
+    <div class="dc-sub">Escribe tu pregunta en español normal — responde con los datos en vivo</div>
+    <div id="chatHist" style="display:flex;flex-direction:column;gap:10px;margin:12px 0;max-height:320px;overflow-y:auto">
+      ${CHAT.map(m=>`<div style="padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13.5px;line-height:1.5;${m.rol==='tu'?'align-self:flex-end;background:var(--brand,#4F46E5);color:#fff':'align-self:flex-start;background:var(--bg-soft,#F3F4F6)'}">${m.txt}</div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${CHAT.length?'':chips.map(c=>`<button class="btn btn-ghost aiChip" style="font-size:12px;padding:6px 10px">${c}</button>`).join('')}</div>
+    <div style="display:flex;gap:8px"><input id="aiPregunta" type="text" placeholder="Ej. ¿cuántas ventas llevamos este mes y de quién?" style="flex:1" onkeydown="if(event.key==='Enter')document.getElementById('aiEnviar').click()">
+    <button class="btn btn-primary" id="aiEnviar">Preguntar</button></div></div>`;
+}
+async function preguntarCRM(q){
+  if(!q.trim())return;
+  CHAT.push({rol:'tu',txt:q});
+  const hist=$('chatHist');
+  hist.innerHTML+=`<div style="padding:10px 14px;border-radius:12px;max-width:85%;align-self:flex-end;background:var(--brand,#4F46E5);color:#fff;font-size:13.5px">${q}</div><div id="aiWait" style="align-self:flex-start;padding:10px 14px;background:var(--bg-soft,#F3F4F6);border-radius:12px"><span class="loader"></span></div>`;
+  hist.scrollTop=hist.scrollHeight;$('aiPregunta').value='';
+  try{
+    const {data,error}=await db.functions.invoke('asistente-crm',{body:{pregunta:q,resumen:resumenCRM()}});
+    if(error)throw error;
+    if(data?.error)throw new Error(data.error);
+    CHAT.push({rol:'crm',txt:data.respuesta||'Sin respuesta'});
+    $('aiWait').outerHTML=`<div style="padding:10px 14px;border-radius:12px;max-width:85%;align-self:flex-start;background:var(--bg-soft,#F3F4F6);white-space:pre-wrap;font-size:13.5px;line-height:1.5">${data.respuesta}</div>`;
+  }catch(e){
+    CHAT.pop();
+    $('aiWait').outerHTML=`<div style="padding:10px 14px;border-radius:12px;align-self:flex-start;background:#FEE2E2;color:#991B1B;font-size:13px">No pude consultar al asistente: ${e.message||e}. ¿Ya está instalada la función asistente-crm con su API key en Supabase?</div>`;
+  }
+  hist.scrollTop=hist.scrollHeight;
+}
+function wireAsistente(){
+  const inp=$('aiPregunta');if(!inp)return;
+  $('aiEnviar').onclick=()=>preguntarCRM(inp.value);
+  document.querySelectorAll('.aiChip').forEach(b=>b.onclick=()=>preguntarCRM(b.textContent));
+}
 let DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};
 let SUPMAP=null;   // agente → supervisor
 async function cargarSupMap(){
@@ -1186,6 +1244,7 @@ async function renderDashboard(){
       <button class="btn-report" id="btnInforme"><span class="rd"></span>Generar informe en vivo</button>
     </div>
     ${filtroBarHTML()}
+    ${asistenteHTML()}
     <div class="kpis6">
       <div class="kpi kpi-pro p1"><div class="kl">Leads</div><div class="kv" data-cu="${total}">0</div><div class="kf">en el sistema</div></div>
       <div class="kpi kpi-pro p2"><div class="kl">Viables</div><div class="kv c" data-cu="${viab}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% del total</div></div>
@@ -1222,6 +1281,7 @@ async function renderDashboard(){
       </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`;
 
   wireFiltrosDash();
+  wireAsistente();
   // count-up
   D.querySelectorAll('[data-cu]').forEach(el=>countUp(el,parseInt(el.dataset.cu),1000,el.dataset.suf||''));
   // charts
