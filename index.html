@@ -280,7 +280,7 @@ tbody tr:hover{background:#F7F8FF}
   <div class="main">
     <div class="page-head">
       <div>
-        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Carga del día</button></div>
+        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Carga del día</button><button data-s="lanzamientos" id="tabLanzamientos" class="hidden">Lanzamientos</button></div>
         <h1 id="pageTitle">Mi cartera</h1><div class="ph-sub" id="cartSub">Tus leads de campañas de WhatsApp</div>
       </div>
       <button class="btn btn-primary" id="btnNuevo">+ Nuevo lead</button>
@@ -304,6 +304,7 @@ tbody tr:hover{background:#F7F8FF}
         <button data-v="tabla" class="on">▤ Tabla</button>
         <button data-v="tablero">▦ Tablero</button>
       </div>
+      <button class="btn btn-ghost" id="btnVerArch" title="Ver leads archivados" style="white-space:nowrap">🗄 Archivados</button>
     </div>
     <div id="kanban" class="kanban hidden"></div>
     <div class="tablecard" id="tablecard">
@@ -353,6 +354,29 @@ tbody tr:hover{background:#F7F8FF}
         <div class="field"><label>Mensajes enviados (opcional, se edita después)</label><input id="ncMsgs" type="number" min="0" placeholder="0"></div>
         <button class="btn btn-primary" id="btnNuevaCampana">+ Crear campaña</button>
         <div id="campList" style="margin-top:18px"></div>
+      </div>
+    </div>
+    <div id="lanzSection" class="hidden">
+      <div class="dash-card">
+        <h3>Depurador pre-lanzamiento · alcance único</h3>
+        <div class="dc-sub">Sube el Excel con los números que planeas lanzar. Se cruzan contra todo lo ya enviado, los rechazos y los leads activos — así nadie recibe mensaje dos veces.</div>
+        <div class="filerow" style="margin-bottom:14px">
+          <label class="filebtn" for="lanzFile">📄 Elegir Excel del lanzamiento</label>
+          <input id="lanzFile" type="file" accept=".xlsx,.xls" class="hidden">
+          <span class="fileok hidden" id="lanzFileName"></span>
+        </div>
+        <button class="btn btn-primary" id="btnDepurar" disabled>Depurar base</button>
+        <div id="lanzResultado" style="margin-top:16px"></div>
+        <div id="lanzRegistro" class="hidden" style="margin-top:18px;border-top:1px solid var(--line);padding-top:16px">
+          <div style="font-weight:700;margin-bottom:4px">Registrar lanzamiento aprobado</div>
+          <div class="dc-sub">Crea la campaña y agrega los números LIMPIOS a la base de enviados. Después de esto ya puedes subirlos a iVentas.</div>
+          <div class="row2" style="margin-bottom:10px">
+            <div class="field"><label>Nombre de la campaña</label><input id="lzNombre" type="text" placeholder="Ej. Armalo 21-25 110726"></div>
+            <div class="field"><label>Fecha de envío</label><input id="lzFecha" type="date"></div>
+          </div>
+          <button class="btn btn-primary" id="btnRegistrarLanz">🚀 Registrar lanzamiento</button>
+          <div id="lanzRegResultado" style="margin-top:12px"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -451,6 +475,13 @@ tbody tr:hover{background:#F7F8FF}
       </div>
     </div>
     <div class="dmsg" id="drMsg"></div>
+    <div class="cond hidden" id="f-derivado" style="border:1.5px solid var(--brand,#4F46E5);border-radius:12px;padding:14px;margin-top:10px">
+      <div style="font-weight:700;margin-bottom:4px">🔗 ¿Es una línea adicional de un cliente tuyo?</div>
+      <div class="hint" style="margin-bottom:10px">Este número no viene de ningún masivo. Si es otra línea de un cliente que ya tienes, búscalo y ligalo como lead derivado.</div>
+      <div class="field"><label>Busca el lead original en tu cartera</label><input id="dvBuscar" type="text" placeholder="Nombre o teléfono del cliente original…"></div>
+      <div id="dvResultados" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto"></div>
+      <div id="dvSel" class="hidden" style="margin-top:10px;padding:10px 12px;background:var(--green-soft,#DCFCE7);border-radius:9px;font-size:13px"></div>
+    </div>
     <div class="hist-sec hidden" id="secHistorial">
       <div class="sec-title"><span class="n">✓</span>Seguimiento del lead</div>
       <div id="timeline" class="timeline"></div>
@@ -463,6 +494,8 @@ tbody tr:hover{background:#F7F8FF}
     </div>
   </div>
   <div class="drawer-foot">
+    <button class="btn btn-ghost hidden" id="drEliminar" style="color:#DC2626;margin-right:auto" title="Eliminar definitivamente (solo director)">🗑 Eliminar</button>
+    <button class="btn btn-ghost hidden" id="drArchivar">🗄 Archivar</button>
     <button class="btn btn-ghost" id="drCancel">Cancelar</button>
     <button class="btn btn-primary" id="drSave">Guardar lead</button>
   </div>
@@ -491,7 +524,9 @@ const db=window.supabase.createClient(SB_URL,SB_KEY);
 
 let AGENTE=null, LEADS=[], CAMPANAS=[], MOTIVOS=[], ES_STAFF=false;
 let editId=null;                       // id del lead en edición (null=nuevo)
-let st={adeudo:null,renovable:null,etapa:null,ine:null,faltaQue:null,ineUrl:null};
+let st={adeudo:null,renovable:null,etapa:null,ine:null,faltaQue:null,ineUrl:null,padreId:null};
+let VER_ARCH=false;                    // toggle de leads archivados
+let lanzFilas=null, lanzLimpios=null;  // depurador de lanzamientos
 
 const $=id=>document.getElementById(id);
 const show=el=>el.classList.remove('hidden');
@@ -551,6 +586,7 @@ async function entrarApp(session){
     show($('filterAgenteWrap'));
     $('tabDashboard').classList.toggle('hidden',!['director','supervisor'].includes(agente.rol));
     $('tabAsignar').classList.toggle('hidden',!['director','depurador'].includes(agente.rol));
+    $('tabLanzamientos').classList.toggle('hidden',agente.rol!=='director');
     if(['director','depurador'].includes(agente.rol)) cargarSelectsAsignar();
   }
   hide($('boot'));hide($('login'));show($('app'));
@@ -581,6 +617,7 @@ async function cargarMotivos(){
 }
 async function cargarLeads(){
   let q=db.from('leads').select('*, campanas(nombre), agentes(nombre)').order('creado_en',{ascending:false});
+  q=VER_ARCH?q.eq('archivado',true):q.or('archivado.is.null,archivado.eq.false');
   if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
   const {data,error}=await q;
   if(error){toast('Error al cargar leads',false);return;}
@@ -613,7 +650,8 @@ function render(){
   rows.forEach(l=>{
     const tr=document.createElement('tr');tr.onclick=()=>abrirDrawer(l);
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
-    tr.innerHTML=`<td class="tel">${l.telefono||'—'}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'');
+    tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}</td>`;
     tb.appendChild(tr);
@@ -677,7 +715,11 @@ function recalcAcel(){
 // ===== DRAWER =====
 function abrirDrawer(lead){
   editId=lead?lead.id:null;
-  st={adeudo:null,renovable:null,etapa:null,ine:null,faltaQue:null,ineUrl:null};
+  st={adeudo:null,renovable:null,etapa:null,ine:null,faltaQue:null,ineUrl:null,padreId:null};
+  hide($('f-derivado'));$('dvBuscar').value='';$('dvResultados').innerHTML='';hide($('dvSel'));
+  $('drArchivar').classList.toggle('hidden',!lead);
+  if(lead)$('drArchivar').textContent=lead.archivado?'📂 Desarchivar':'🗄 Archivar';
+  $('drEliminar').classList.toggle('hidden',!(lead&&AGENTE.rol==='director'));
   $('drTitle').textContent=lead?'Editar lead':'Nuevo lead';
   $('drSub').textContent=lead?(lead.telefono+' · '+(lead.nombre||'sin nombre')):'Registra y clasifica el lead paso a paso';
   // reset campos
@@ -746,6 +788,7 @@ async function guardar(){
     if(st.etapa==='Lead caído'){if(!$('kMotivo').value)return fail('Selecciona el motivo de la caída.');o.motivo_caida_id=parseInt($('kMotivo').value);o.comentarios=$('kComent').value.trim()||null;}
   }
 
+  if(st.padreId)o.lead_padre_id=st.padreId;
   const btn=$('drSave');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
   let error, etapaAnterior=null;
   if(editId){
@@ -756,7 +799,12 @@ async function guardar(){
   }
   btn.disabled=false;btn.textContent='Guardar lead';
   if(error){
-    if((error.message||'').includes('uq_lead_telefono')||error.code==='23505')return fail('Ese teléfono ya está registrado en el sistema.');
+    if((error.message||'').includes('uq_lead_telefono')||(error.message||'').includes('uq_lead_tel10')||error.code==='23505')return fail('Ese teléfono ya está registrado en el sistema.');
+    if((error.message||'').includes('CANDADO')){
+      show($('f-derivado'));renderDvResultados('');
+      return fail('Este número no viene de ningún masivo. Si es línea adicional de un cliente tuyo, ligalo abajo como derivado y vuelve a guardar.');
+    }
+    if((error.message||'').includes('lead padre'))return fail(error.message.replace(/^.*?:\s*/,''));
     return fail('Error: '+error.message);
   }
   // bitácora si cambió etapa
@@ -813,7 +861,8 @@ function renderKanban(){
       let tag='';
       if(l.etapa==='Aceleración pendiente'&&l.acel_fecha_subir){const f=new Date(l.acel_fecha_subir+'T00:00:00');tag=`<span class="ktag">Subir: ${f.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span>`;}
       if(l.etapa==='Venta exitosa'&&l.folio_avs)tag=`<span class="ktag" style="background:var(--green-soft);color:var(--green)">${l.folio_avs}</span>`;
-      card.innerHTML=`<div class="ktel">${l.telefono}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${tag}`;
+      const dv=l.lead_padre_id?'<span title="Lead derivado" style="font-size:11px"> 🔗</span>':'';
+      card.innerHTML=`<div class="ktel">${l.telefono}${dv}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${tag}`;
       card.onclick=()=>abrirDrawer(l);
       card.addEventListener('dragstart',e=>{dragLeadId=l.id;card.classList.add('dragging');});
       card.addEventListener('dragend',e=>{card.classList.remove('dragging');});
@@ -882,6 +931,7 @@ function setSeccion(s){
   $('opSection').classList.toggle('hidden',s!=='operacion');
   $('dashboard').classList.toggle('hidden',s!=='dashboard');
   $('asignarSection').classList.toggle('hidden',s!=='asignar');
+  $('lanzSection').classList.toggle('hidden',s!=='lanzamientos');
   if(s==='asignar')renderCampanas();
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
@@ -1388,6 +1438,115 @@ async function cambiarPass(){
   toast('Contraseña actualizada');
   setTimeout(cerrarPass,1200);
 }
+// ===== LEAD DERIVADO =====
+function renderDvResultados(q){
+  const cont=$('dvResultados');const term=norm(q);
+  // solo cartera propia, que no sean derivados a su vez
+  let cand=LEADS.filter(l=>!l.lead_padre_id&&l.agente_id===AGENTE.id);
+  if(term)cand=cand.filter(l=>norm(l.nombre).includes(term)||(l.telefono||'').includes(q.replace(/\D/g,'')));
+  cand=cand.slice(0,8);
+  cont.innerHTML=cand.length?cand.map(l=>`<button type="button" class="btn btn-ghost dvOpt" data-id="${l.id}" style="justify-content:flex-start;text-align:left;padding:8px 12px">
+    <span style="font-weight:700;margin-right:8px">${l.telefono}</span> ${l.nombre||'Sin nombre'} <span class="muted-cell" style="margin-left:auto;font-size:11px">${l.etapa||'sin tipificar'}</span></button>`).join('')
+    :'<div class="hint">Sin coincidencias en tu cartera. Escribe el nombre o teléfono del cliente original.</div>';
+  cont.querySelectorAll('.dvOpt').forEach(b=>b.onclick=()=>{
+    const l=LEADS.find(x=>String(x.id)===b.dataset.id);if(!l)return;
+    st.padreId=l.id;
+    $('dvSel').innerHTML='🔗 Derivado de: <b>'+(l.nombre||l.telefono)+'</b> ('+l.telefono+') — vuelve a dar Guardar.';
+    show($('dvSel'));
+  });
+}
+
+// ===== ARCHIVAR / ELIMINAR =====
+async function archivarLead(){
+  if(!editId)return;
+  const lead=LEADS.find(l=>l.id===editId);const nuevo=!(lead?.archivado);
+  const b=$('drArchivar');b.disabled=true;
+  const {error}=await db.from('leads').update({archivado:nuevo,archivado_en:nuevo?new Date().toISOString():null}).eq('id',editId);
+  b.disabled=false;
+  if(error){toast('Error al archivar: '+error.message,false);return;}
+  db.from('bitacora_movimientos').insert({lead_id:editId,agente_id:AGENTE.id,etapa_anterior:lead?.etapa||null,etapa_nueva:lead?.etapa||null,detalle:nuevo?'Lead archivado':'Lead desarchivado'}).then(()=>{},()=>{});
+  cerrarDrawer();toast(nuevo?'Lead archivado':'Lead restaurado');await cargarLeads();
+}
+async function eliminarLead(){
+  if(!editId||AGENTE.rol!=='director')return;
+  const lead=LEADS.find(l=>l.id===editId);
+  if(!confirm('¿ELIMINAR definitivamente el lead de '+(lead?.nombre||lead?.telefono)+'?\n\nSe borra su historial y notas. Esta acción NO se puede deshacer.\n\nSi solo quieres sacarlo de la vista, usa Archivar.'))return;
+  if(!confirm('Última confirmación: eliminar PARA SIEMPRE este lead.'))return;
+  const b=$('drEliminar');b.disabled=true;
+  const {data,error}=await db.rpc('eliminar_lead',{p_id:editId});
+  b.disabled=false;
+  if(error){toast('No se pudo eliminar: '+error.message,false);return;}
+  cerrarDrawer();toast('Lead eliminado definitivamente');await cargarLeads();
+}
+
+// ===== DEPURADOR DE LANZAMIENTOS =====
+function extraerNumeros(rows){
+  const set=new Set();
+  rows.forEach(r=>r.forEach(c=>{const d=String(c==null?'':c).replace(/\D/g,'');if(d.length>=10)set.add(d.slice(-10));}));
+  return [...set];
+}
+async function depurarLanzamiento(){
+  if(!lanzFilas)return toast('Elige un archivo primero',false);
+  const nums=extraerNumeros(lanzFilas);
+  if(!nums.length)return toast('No encontré teléfonos de 10 dígitos en el archivo',false);
+  const btn=$('btnDepurar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  let res=[];
+  try{
+    for(let i=0;i<nums.length;i+=2000){
+      const {data,error}=await db.rpc('depurar_base',{nums:nums.slice(i,i+2000)});
+      if(error)throw error;
+      res=res.concat(data||[]);
+    }
+  }catch(e){btn.disabled=false;btn.textContent='Depurar base';return toast('Error al depurar: '+e.message,false);}
+  btn.disabled=false;btn.textContent='Depurar base';
+  const g={LIMPIO:[],YA_ENVIADO:[],LEAD_ACTIVO:[],RECHAZADO_PREVIO:[]};
+  res.forEach(r=>{(g[r.estatus]||g.LIMPIO).push(r);});
+  lanzLimpios=g.LIMPIO.map(r=>r.telefono);
+  const pill=(n,txt,color,bg)=>`<div style="flex:1;min-width:130px;background:${bg};border-radius:11px;padding:12px 14px"><div style="font-size:22px;font-weight:800;color:${color}">${n}</div><div style="font-size:12px;color:${color};font-weight:600">${txt}</div></div>`;
+  let html='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    +pill(g.LIMPIO.length,'✅ Limpios — se lanzan','#16A34A','#DCFCE7')
+    +pill(g.YA_ENVIADO.length,'📤 Ya enviados antes','#D97706','#FEF3C7')
+    +pill(g.LEAD_ACTIVO.length,'👤 Lead activo de agente','#4F46E5','#EEF2FF')
+    +pill(g.RECHAZADO_PREVIO.length,'🚫 Rechazaron antes','#DC2626','#FEE2E2')+'</div>';
+  const detalle=[...g.YA_ENVIADO,...g.LEAD_ACTIVO,...g.RECHAZADO_PREVIO];
+  if(detalle.length){
+    html+='<details><summary style="cursor:pointer;font-size:13px;font-weight:600;margin-bottom:8px">Ver los '+detalle.length+' eliminados y por qué</summary>';
+    html+='<div style="max-height:260px;overflow-y:auto;margin-top:8px"><table class="atable"><thead><tr><th>Teléfono</th><th>Estatus</th><th>Detalle</th></tr></thead><tbody>'
+      +detalle.map(r=>`<tr><td>${r.telefono}</td><td>${r.estatus.replace(/_/g,' ')}</td><td class="muted-cell">${r.detalle||''}</td></tr>`).join('')+'</tbody></table></div></details>';
+  }
+  if(lanzLimpios.length){
+    html+='<div style="margin-top:12px"><button class="btn btn-ghost" id="btnDescargarLimpios">⬇️ Descargar lista limpia ('+lanzLimpios.length+') para iVentas</button></div>';
+  }
+  $('lanzResultado').innerHTML=html;
+  const bd=$('btnDescargarLimpios');
+  if(bd)bd.onclick=()=>{
+    const ws=XLSX.utils.aoa_to_sheet([['Telefono'],...lanzLimpios.map(t=>[t])]);
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Limpios');
+    XLSX.writeFile(wb,'lanzamiento_limpio_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  };
+  $('lanzRegistro').classList.toggle('hidden',lanzLimpios.length===0);
+  $('lanzRegResultado').innerHTML='';
+}
+async function registrarLanzamiento(){
+  const nombre=$('lzNombre').value.trim(),fecha=$('lzFecha').value;
+  if(!nombre)return toast('Escribe el nombre de la campaña',false);
+  if(!lanzLimpios||!lanzLimpios.length)return toast('Primero depura la base',false);
+  if(!confirm('Registrar "'+nombre+'" con '+lanzLimpios.length+' números limpios en la base de enviados?'))return;
+  const btn=$('btnRegistrarLanz');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  let agregados=0,existian=0;
+  try{
+    for(let i=0;i<lanzLimpios.length;i+=2000){
+      const {data,error}=await db.rpc('registrar_lanzamiento',{p_campana:nombre,p_fecha:fecha||new Date().toISOString().slice(0,10),nums:lanzLimpios.slice(i,i+2000)});
+      if(error)throw error;
+      if(data&&data[0]){agregados+=data[0].agregados||0;existian+=data[0].ya_existian||0;}
+    }
+  }catch(e){btn.disabled=false;btn.innerHTML='🚀 Registrar lanzamiento';return toast('Error: '+e.message,false);}
+  btn.disabled=false;btn.innerHTML='🚀 Registrar lanzamiento';
+  $('lanzRegResultado').innerHTML='<div class="viab-banner vi">✅ Campaña <b>'+nombre+'</b> registrada: '+agregados+' números agregados a la base'+(existian?' ('+existian+' ya existían)':'')+'. Sube la lista limpia a iVentas y actualiza los mensajes enviados en Gestionar campañas.</div>';
+  toast('Lanzamiento registrado');
+  await cargarCampanas();await cargarSelectsAsignar();
+}
+
 // ===== EVENTOS =====
 $('loginBtn').onclick=login;
 $('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
@@ -1411,6 +1570,15 @@ document.addEventListener('change',e=>{if(e.target.id==='recEtapa')actualizarRec
 $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
 $('drSave').onclick=guardar;
 $('notaAdd').onclick=agregarNota;
+$('drArchivar').onclick=archivarLead;
+$('drEliminar').onclick=eliminarLead;
+$('dvBuscar').addEventListener('input',e=>renderDvResultados(e.target.value));
+$('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.background=VER_ARCH?'var(--brand,#4F46E5)':'';$('btnVerArch').style.color=VER_ARCH?'#fff':'';
+  $('pageTitle').textContent=VER_ARCH?'Leads archivados':(AGENTE.rol==='director'?'Todos los leads':(AGENTE.rol==='agente'?'Mi cartera':'Cartera del equipo'));
+  await cargarLeads();};
+$('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
+$('btnDepurar').onclick=depurarLanzamiento;
+$('btnRegistrarLanz').onclick=registrarLanzamiento;
 $('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
