@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM Leads · ExpertCell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#F5F6F8; --surface:#FFFFFF; --line:#E6E8EC; --line2:#EEF0F3;
+  --text:#161A22; --muted:#6B7280; --dim:#9AA3AF;
+  --brand:#4F46E5; --brand-dark:#4338CA; --brand-soft:#EEF0FF;
+  --green:#16A34A; --green-soft:#E7F6EC; --amber:#D97706; --amber-soft:#FDF3E7;
+  --red:#DC2626; --red-soft:#FDECEC; --cyan:#0891B2; --cyan-soft:#E4F5F9;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px -8px rgba(16,24,40,.12);
+  --shadow-lg:0 12px 40px -12px rgba(16,24,40,.25);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.disp{font-family:'Space Grotesk',sans-serif;letter-spacing:-.01em}
+button{font-family:inherit;cursor:pointer;border:none;background:none}
+input,select{font-family:inherit;font-size:14px;outline:none}
+.hidden{display:none!important}
+
+/* ---------- LOGIN ---------- */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:radial-gradient(1000px 500px at 50% -10%,#EEF0FF,transparent 60%),var(--bg)}
+.login-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-lg);
+  width:100%;max-width:400px;padding:40px 36px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.brand .dot{width:11px;height:11px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 4px var(--brand-soft)}
+.brand .bn{font-family:'Space Grotesk';font-weight:700;font-size:17px}
+.login-card h1{font-family:'Space Grotesk';font-size:22px;font-weight:600;margin-bottom:6px}
+.login-card .sub{color:var(--muted);margin-bottom:28px;font-size:13.5px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:7px}
+.field input{width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#FCFCFD;transition:.15s}
+.field input:focus{border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px var(--brand-soft)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px;
+  padding:11px 18px;border-radius:10px;transition:.15s;white-space:nowrap}
+.btn-primary{background:var(--brand);color:#fff;width:100%}
+.btn-primary:hover{background:var(--brand-dark)}
+.btn-primary:disabled{opacity:.6;cursor:not-allowed}
+.login-msg{font-size:13px;margin-top:16px;padding:10px 12px;border-radius:8px;display:none}
+.login-msg.err{display:block;background:var(--red-soft);color:var(--red)}
+.login-foot{margin-top:24px;padding-top:20px;border-top:1px solid var(--line2);font-size:12px;color:var(--dim);text-align:center}
+
+/* ---------- APP SHELL ---------- */
+#app{min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:var(--surface);border-bottom:1px solid var(--line);padding:0 24px;height:60px;
+  display:flex;align-items:center;gap:20px;position:sticky;top:0;z-index:30}
+.topbar .brand{margin:0}
+.topbar .spacer{flex:1}
+.userchip{display:flex;align-items:center;gap:11px;padding:6px 8px 6px 14px;border-radius:12px;transition:.15s;position:relative}
+.userchip:hover{background:var(--bg)}
+.userchip .ui{text-align:right}
+.userchip .un{font-weight:600;font-size:13.5px}
+.userchip .ur{font-size:11.5px;color:var(--muted)}
+.userchip .av{width:36px;height:36px;border-radius:10px;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-family:'Space Grotesk'}
+.menu{position:absolute;top:52px;right:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);padding:6px;min-width:180px;display:none}
+.menu.open{display:block}
+.menu button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 12px;border-radius:8px;font-size:13.5px;color:var(--text)}
+.menu button:hover{background:var(--bg)}
+.menu .sep{height:1px;background:var(--line2);margin:6px 0}
+
+.main{flex:1;padding:24px;max-width:1400px;width:100%;margin:0 auto}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+.page-head h1{font-family:'Space Grotesk';font-size:24px;font-weight:600}
+.page-head .ph-sub{color:var(--muted);font-size:13.5px;margin-top:3px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+.kpi .kl{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px}
+.kpi .kv{font-family:'Space Grotesk';font-size:28px;font-weight:700;line-height:1}
+.kpi .kv.g{color:var(--green)} .kpi .kv.b{color:var(--brand)} .kpi .kv.c{color:var(--cyan)}
+.kpi .kf{font-size:11.5px;color:var(--dim);margin-top:6px}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.search{position:relative;flex:1;min-width:200px;max-width:340px}
+.search input{width:100%;padding:10px 14px 10px 38px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--dim)}
+.selectwrap select{padding:10px 32px 10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236B7280' stroke-width='2' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+
+/* Table */
+.tablecard{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.tbl-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+  padding:13px 16px;border-bottom:1px solid var(--line);background:#FCFCFD;white-space:nowrap}
+tbody td{padding:14px 16px;border-bottom:1px solid var(--line2);font-size:13.5px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr{transition:.12s}
+tbody tr:hover{background:#FBFBFD}
+.tel{font-weight:600;font-variant-numeric:tabular-nums}
+.cliente{color:var(--text)}
+.muted-cell{color:var(--dim)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap}
+.badge .d{width:6px;height:6px;border-radius:50%}
+.b-viable{background:var(--green-soft);color:var(--green)} .b-viable .d{background:var(--green)}
+.b-noviable{background:var(--red-soft);color:var(--red)} .b-noviable .d{background:var(--red)}
+.b-pend{background:var(--bg);color:var(--muted)} .b-pend .d{background:var(--dim)}
+.b-etapa{background:var(--brand-soft);color:var(--brand-dark)}
+.b-venta{background:var(--green-soft);color:var(--green)}
+.b-caido{background:var(--red-soft);color:var(--red)}
+.b-acel{background:var(--amber-soft);color:var(--amber)}
+
+/* Empty state */
+.empty{text-align:center;padding:70px 24px}
+.empty .ico{width:56px;height:56px;border-radius:16px;background:var(--brand-soft);color:var(--brand);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+.empty h3{font-family:'Space Grotesk';font-size:18px;font-weight:600;margin-bottom:6px}
+.empty p{color:var(--muted);max-width:340px;margin:0 auto 20px}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(16,24,40,.45);backdrop-filter:blur(3px);z-index:50;display:none;align-items:center;justify-content:center;padding:24px}
+.overlay.open{display:flex}
+.modal{background:var(--surface);border-radius:20px;box-shadow:var(--shadow-lg);width:100%;max-width:460px;overflow:hidden;animation:pop .2s ease}
+@keyframes pop{from{transform:translateY(12px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.modal-head{padding:22px 24px 0}
+.modal-head h2{font-family:'Space Grotesk';font-size:19px;font-weight:600}
+.modal-head p{color:var(--muted);font-size:13px;margin-top:4px}
+.modal-body{padding:22px 24px}
+.modal-foot{padding:16px 24px;background:#FCFCFD;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.btn-ghost{background:var(--surface);border:1px solid var(--line);color:var(--text)}
+.btn-ghost:hover{background:var(--bg)}
+.field select{width:100%;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#FCFCFD;cursor:pointer}
+.field select:focus,.field input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.modal-msg{font-size:12.5px;margin-top:6px;color:var(--red);display:none}
+.modal-msg.show{display:block}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:#fff;
+  padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;transition:.25s;z-index:60;pointer-events:none;display:flex;align-items:center;gap:9px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{background:#0F2E1B}.toast.ok .td{color:#5EE9A0}
+.toast .td{color:#8FA0FF;font-weight:700}
+
+.loader{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.center-load{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted)}
+.center-load .loader{border-color:var(--line);border-top-color:var(--brand);width:28px;height:28px}
+
+@media(max-width:720px){
+  .kpis{grid-template-columns:1fr 1fr}
+  .topbar{padding:0 16px}.main{padding:16px}
+  .userchip .ui{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADER inicial -->
+<div id="boot" class="center-load"><div class="loader"></div><div>Cargando…</div></div>
+
+<!-- LOGIN -->
+<div id="login" class="hidden">
+  <div class="login-card">
+    <div class="brand"><span class="dot"></span><span class="bn">ExpertCell</span></div>
+    <h1>Bienvenido</h1>
+    <p class="sub">Ingresa a tu CRM de leads AT&T</p>
+    <div class="field">
+      <label>Usuario</label>
+      <input id="loginUser" type="text" placeholder="nombre.apellido" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button id="loginBtn" class="btn btn-primary">Entrar</button>
+    <div id="loginMsg" class="login-msg"></div>
+    <div class="login-foot">CRM Leads · ExpertCell · Distribuidor autorizado AT&T</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span><span class="bn">ExpertCell</span></div>
+    <div class="spacer"></div>
+    <div class="userchip" id="userchip">
+      <div class="ui"><div class="un" id="uName">—</div><div class="ur" id="uRole">—</div></div>
+      <div class="av" id="uAvatar">—</div>
+      <div class="menu" id="userMenu">
+        <button id="btnLogout">Cerrar sesión</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="page-head">
+      <div>
+        <h1>Mi cartera</h1>
+        <div class="ph-sub" id="cartSub">Tus leads de campañas de WhatsApp</div>
+      </div>
+      <button class="btn btn-primary" id="btnNuevo">+ Nuevo lead</button>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="kl">Leads</div><div class="kv" id="kLeads">0</div><div class="kf">registrados</div></div>
+      <div class="kpi"><div class="kl">Viables</div><div class="kv c" id="kViab">0</div><div class="kf" id="kViabPct">—</div></div>
+      <div class="kpi"><div class="kl">Ventas</div><div class="kv g" id="kVentas">0</div><div class="kf">cerradas</div></div>
+      <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf">sobre viables</div></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="search" type="text" placeholder="Buscar por teléfono o nombre…">
+      </div>
+      <div class="selectwrap"><select id="filterEstado">
+        <option value="">Todos los estados</option>
+        <option value="sin">Sin evaluar</option>
+        <option value="VIABLE">Viables</option>
+        <option value="NO VIABLE">No viables</option>
+        <option value="Venta exitosa">Ventas</option>
+        <option value="Lead caído">Caídos</option>
+      </select></div>
+    </div>
+
+    <div class="tablecard">
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr>
+            <th>Teléfono</th><th>Cliente</th><th>Campaña</th><th>Viabilidad</th><th>Etapa</th><th>Registrado</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="empty hidden">
+        <div class="ico"><svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></div>
+        <h3>Aún no tienes leads</h3>
+        <p>Cuando te caiga una respuesta de WhatsApp, regístrala aquí para no perderla.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('btnNuevo').click()">+ Registrar mi primer lead</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL NUEVO LEAD -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Nuevo lead</h2>
+      <p>Registra la campaña, el teléfono y el nombre del cliente.</p>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Campaña</label>
+        <select id="mCampana"><option value="">Selecciona…</option></select>
+      </div>
+      <div class="field">
+        <label>Teléfono (10 dígitos)</label>
+        <input id="mTel" type="text" inputmode="numeric" maxlength="10" placeholder="5512345678">
+      </div>
+      <div class="field">
+        <label>Nombre del cliente</label>
+        <input id="mNombre" type="text" placeholder="Nombre y apellido">
+      </div>
+      <div class="modal-msg" id="mMsg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" id="mCancel">Cancelar</button>
+      <button class="btn btn-primary" id="mSave">Guardar lead</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ====== CONFIG SUPABASE ======
+const SB_URL = 'https://hefqbuyphwqllqxobaam.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhlZnFidXlwaHdxbGxxeG9iYWFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2NTc2MjgsImV4cCI6MjA5OTIzMzYyOH0.Rq9wiNIWfTX6x92cqCrGw6tpBHMC3hrJBv2DaVN9WWI';
+const EMAIL_DOMAIN = '@crm.expertcell';   // dominio interno para el login
+const db = window.supabase.createClient(SB_URL, SB_KEY);
+
+let AGENTE = null;   // perfil del agente logueado
+let LEADS = [];      // leads en memoria
+
+// ====== HELPERS ======
+const $ = id => document.getElementById(id);
+const show = el => el.classList.remove('hidden');
+const hide = el => el.classList.add('hidden');
+function toast(msg, ok=true){
+  const t=$('toast'); t.innerHTML=(ok?'<span class="td">✓</span>':'<span class="td">!</span>')+msg;
+  t.className='toast show'+(ok?' ok':''); setTimeout(()=>t.className='toast'+(ok?' ok':''),2600);
+}
+function iniciales(nombre){return (nombre||'?').split(' ').slice(0,2).map(s=>s[0]).join('').toUpperCase();}
+function fechaCorta(iso){const d=new Date(iso);return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});}
+
+// ====== AUTH FLOW ======
+async function boot(){
+  const { data:{ session } } = await db.auth.getSession();
+  if(session){ await entrarApp(session); }
+  else { hide($('boot')); show($('login')); }
+}
+async function entrarApp(session){
+  const usuario = session.user.email.split('@')[0];
+  const { data:agente, error } = await db.from('agentes')
+    .select('*, supervisores(nombre)').eq('usuario', usuario).maybeSingle();
+  if(error || !agente){
+    hide($('boot')); show($('login'));
+    $('loginMsg').className='login-msg err';
+    $('loginMsg').textContent='Tu usuario no está registrado como agente. Contacta al administrador.';
+    await db.auth.signOut();
+    return;
+  }
+  AGENTE = agente;
+  $('uName').textContent = agente.nombre;
+  $('uRole').textContent = (agente.rol==='director'?'Director':agente.rol==='supervisor'?'Supervisor · '+(agente.supervisores?.nombre||''):'Agente · '+(agente.supervisores?.nombre||''));
+  $('uAvatar').textContent = iniciales(agente.nombre);
+  if(agente.rol!=='agente'){ $('cartSub').textContent = 'Vista '+agente.rol+' · todos los leads del sistema'; document.querySelector('.page-head h1').textContent = (agente.rol==='director'?'Todos los leads':'Cartera del equipo'); }
+  hide($('boot')); hide($('login')); show($('app'));
+  await Promise.all([cargarCampanas(), cargarLeads()]);
+}
+async function login(){
+  const user=$('loginUser').value.trim().toLowerCase();
+  const pass=$('loginPass').value;
+  if(!user||!pass){ $('loginMsg').className='login-msg err'; $('loginMsg').textContent='Escribe tu usuario y contraseña.'; return; }
+  const btn=$('loginBtn'); btn.disabled=true; btn.innerHTML='<span class="loader"></span>';
+  const email = user.includes('@') ? user : user+EMAIL_DOMAIN;
+  const { data, error } = await db.auth.signInWithPassword({ email, password:pass });
+  btn.disabled=false; btn.textContent='Entrar';
+  if(error){ $('loginMsg').className='login-msg err'; $('loginMsg').textContent='Usuario o contraseña incorrectos.'; return; }
+  $('loginMsg').className='login-msg';
+  await entrarApp(data.session);
+}
+
+// ====== DATOS ======
+async function cargarCampanas(){
+  const { data } = await db.from('campanas').select('id,nombre').eq('activa',true).order('fecha_envio',{ascending:false});
+  const sel=$('mCampana'); sel.innerHTML='<option value="">Selecciona…</option>';
+  (data||[]).forEach(c=>{ const o=document.createElement('option'); o.value=c.id; o.textContent=c.nombre; sel.appendChild(o); });
+}
+async function cargarLeads(){
+  let q = db.from('leads').select('*, campanas(nombre)').order('creado_en',{ascending:false});
+  if(AGENTE.rol==='agente') q=q.eq('agente_id', AGENTE.id);
+  const { data, error } = await q;
+  if(error){ toast('Error al cargar leads',false); return; }
+  LEADS = data||[]; render();
+}
+
+// ====== RENDER ======
+function render(){
+  const term=$('search').value.trim().toLowerCase();
+  const est=$('filterEstado').value;
+  let rows = LEADS.filter(l=>{
+    if(term && !((l.telefono||'').includes(term) || (l.nombre||'').toLowerCase().includes(term))) return false;
+    if(est==='sin' && l.viabilidad) return false;
+    if(est==='VIABLE' && l.viabilidad!=='VIABLE') return false;
+    if(est==='NO VIABLE' && l.viabilidad!=='NO VIABLE') return false;
+    if(est==='Venta exitosa' && l.etapa!=='Venta exitosa') return false;
+    if(est==='Lead caído' && l.etapa!=='Lead caído') return false;
+    return true;
+  });
+  // KPIs (sobre todos, no el filtro)
+  const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length;
+  const vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
+  $('kLeads').textContent=LEADS.length;
+  $('kViab').textContent=viab;
+  $('kViabPct').textContent=LEADS.length?Math.round(viab/LEADS.length*100)+'% del total':'—';
+  $('kVentas').textContent=vent;
+  $('kConv').textContent=viab?Math.round(vent/viab*100)+'%':'—';
+  // tabla
+  const tb=$('tbody'); tb.innerHTML='';
+  if(rows.length===0){ show($('empty')); document.querySelector('table').style.display='none'; return; }
+  hide($('empty')); document.querySelector('table').style.display='';
+  rows.forEach(l=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="tel">${l.telefono||'—'}</td>
+      <td class="cliente">${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
+      <td class="muted-cell">${l.campanas?.nombre||'—'}</td>
+      <td>${viabBadge(l.viabilidad)}</td>
+      <td>${etapaBadge(l.etapa)}</td>
+      <td class="muted-cell">${fechaCorta(l.creado_en)}</td>`;
+    tb.appendChild(tr);
+  });
+}
+function viabBadge(v){
+  if(v==='VIABLE') return '<span class="badge b-viable"><span class="d"></span>Viable</span>';
+  if(v==='NO VIABLE') return '<span class="badge b-noviable"><span class="d"></span>No viable</span>';
+  return '<span class="badge b-pend"><span class="d"></span>Sin evaluar</span>';
+}
+function etapaBadge(e){
+  if(!e) return '<span class="muted-cell">—</span>';
+  if(e==='Venta exitosa') return '<span class="badge b-venta">'+e+'</span>';
+  if(e==='Lead caído') return '<span class="badge b-caido">'+e+'</span>';
+  if(e==='Aceleración pendiente') return '<span class="badge b-acel">'+e+'</span>';
+  return '<span class="badge b-etapa">'+e+'</span>';
+}
+
+// ====== NUEVO LEAD ======
+function abrirModal(){ $('mMsg').className='modal-msg'; $('mCampana').value=''; $('mTel').value=''; $('mNombre').value=''; $('overlay').classList.add('open'); setTimeout(()=>$('mCampana').focus(),50); }
+function cerrarModal(){ $('overlay').classList.remove('open'); }
+async function guardarLead(){
+  const campana_id=$('mCampana').value;
+  const telefono=$('mTel').value.replace(/\D/g,'');
+  const nombre=$('mNombre').value.trim();
+  const msg=$('mMsg');
+  if(!campana_id){ msg.textContent='Selecciona la campaña.'; msg.className='modal-msg show'; return; }
+  if(telefono.length!==10){ msg.textContent='El teléfono debe tener 10 dígitos.'; msg.className='modal-msg show'; return; }
+  if(!nombre){ msg.textContent='Escribe el nombre del cliente.'; msg.className='modal-msg show'; return; }
+  msg.className='modal-msg';
+  const btn=$('mSave'); btn.disabled=true; btn.innerHTML='<span class="loader"></span>';
+  const { error } = await db.from('leads').insert({ campana_id, telefono, nombre, agente_id:AGENTE.id });
+  btn.disabled=false; btn.textContent='Guardar lead';
+  if(error){
+    if((error.message||'').includes('uq_lead_telefono')||error.code==='23505'){
+      msg.textContent='Ese teléfono ya está registrado en el sistema.'; msg.className='modal-msg show';
+    } else { msg.textContent='Error al guardar: '+error.message; msg.className='modal-msg show'; }
+    return;
+  }
+  cerrarModal(); toast('Lead registrado'); await cargarLeads();
+}
+
+// ====== EVENTOS ======
+$('loginBtn').onclick=login;
+$('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+$('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginPass').focus();});
+$('userchip').onclick=e=>{e.stopPropagation();$('userMenu').classList.toggle('open');};
+document.addEventListener('click',()=>$('userMenu').classList.remove('open'));
+$('btnLogout').onclick=async()=>{ await db.auth.signOut(); location.reload(); };
+$('btnNuevo').onclick=abrirModal;
+$('mCancel').onclick=cerrarModal;
+$('mSave').onclick=guardarLead;
+$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))cerrarModal();});
+$('mTel').addEventListener('input',e=>{e.target.value=e.target.value.replace(/\D/g,'');});
+$('search').addEventListener('input',render);
+$('filterEstado').addEventListener('change',render);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarModal();});
+
+boot();
+</script>
+</body>
+</html>
