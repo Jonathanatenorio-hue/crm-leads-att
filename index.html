@@ -555,6 +555,7 @@ async function agregarNota(){
 }
 
 const ETAPAS=[
+  {v:'Inicio de negociación',d:'Primer contacto en curso'},
   {v:'Cotización enviada',d:'Sugerida al inicio'},
   {v:'Aceleración pendiente',d:'Aún no se puede subir'},
   {v:'Falta INE o biométrico',d:'Esperando documento'},
@@ -828,6 +829,7 @@ async function subirIne(file){
 // ===== KANBAN =====
 let vista='tabla', dragLeadId=null;
 const KCOLS=[
+  {e:'Inicio de negociación',c:'#64748B'},
   {e:'Cotización enviada',c:'#4F46E5'},{e:'Aceleración pendiente',c:'#D97706'},
   {e:'Falta INE o biométrico',c:'#0891B2'},{e:'Falta contrato firmado',c:'#7C3AED'},
   {e:'Falta pago inicial',c:'#DB2777'},{e:'Venta exitosa',c:'#16A34A'},{e:'Lead caído',c:'#DC2626'}
@@ -1567,7 +1569,8 @@ $('cargaFile').addEventListener('change',async e=>{const f=e.target.files[0];if(
 $('btnCargar').onclick=procesarCarga;
 $('rzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('rzFileName').textContent='📄 '+f.name;show($('rzFileName'));try{rzFilas=await leerExcel(f);$('btnRechazos').disabled=false;}catch(err){toast('No pude leer el Excel',false);}});
 document.addEventListener('change',e=>{if(e.target.id==='recEtapa')actualizarRecInfo();});
-$('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
+$('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;
+// El clic en el fondo oscuro ya NO cierra la captura (evita perder datos al cambiar de ventana)
 $('drSave').onclick=guardar;
 $('notaAdd').onclick=agregarNota;
 $('drArchivar').onclick=archivarLead;
@@ -1582,7 +1585,7 @@ $('btnRegistrarLanz').onclick=registrarLanzamiento;
 $('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarDrawer();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
 
 bindSeg('segAdeudo',v=>{st.adeudo=v;$('fMontoAdeudo').classList.toggle('hidden',v!=='Sí');recalcViab();});
 bindSeg('segRenovar',v=>{st.renovable=v;$('fNoRenovar').classList.toggle('hidden',v!=='No');recalcViab();});
