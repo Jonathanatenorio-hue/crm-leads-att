@@ -570,7 +570,7 @@ async function login(){
 
 // ===== DATA =====
 async function cargarCampanas(){
-  const {data}=await db.from('campanas').select('id,nombre').eq('activa',true).order('fecha_envio',{ascending:false});
+  const {data}=await db.from('campanas').select('id,nombre,mensajes_enviados').eq('activa',true).order('fecha_envio',{ascending:false});
   CAMPANAS=data||[];const s=$('dCampana');s.innerHTML='<option value="">Selecciona…</option>';
   CAMPANAS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.nombre;s.appendChild(o);});
 }
@@ -1176,18 +1176,23 @@ function tablaEmbudo(){
   return render_atable(headers,rows,totalRow);
 }
 function tablaCampana(){
+  // mapa de mensajes enviados por nombre de campaña
+  const MSG={};CAMPANAS.forEach(c=>MSG[c.nombre]=c.mensajes_enviados||0);
   const C={};
-  LEADS.forEach(l=>{const n=l.campanas?.nombre||'—';const c=C[n]=C[n]||{leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};
+  LEADS.forEach(l=>{const n=l.campanas?.nombre||'—';const c=C[n]=C[n]||{env:MSG[n]||0,leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};
     c.leads++;
     if(l.viabilidad==='VIABLE')c.viab++;
     else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')c.nvAd++;else c.nvRe++;}
     else c.def++;
     if(l.etapa==='Venta exitosa')c.vent++;});
-  RECHAZOS.forEach(r=>{const n=r.campanas?.nombre||'—';const c=C[n]=C[n]||{leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};c.rech++;const m=(r.motivos_rechazo?.nombre||'');if(/interesa/i.test(m))c.noint++;if(/autom/i.test(m))c.auto++;});
-  const headers=['Campaña','Leads','Rechazos','Respuestas','Viables','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv.','No interesa','Resp. autom.'];
-  const rows=Object.entries(C).map(([n,o])=>{const resp=o.leads+o.rech;return [n,o.leads,o.rech,resp,o.viab,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,o.viab),o.noint,o.auto];}).sort((a,b)=>b[1]-a[1]);
-  const T={};['leads','rech','viab','nvAd','nvRe','def','vent','noint','auto'].forEach(k=>T[k]=Object.values(C).reduce((s,o)=>s+o[k],0));
-  const totalRow=['TOTAL',T.leads,T.rech,T.leads+T.rech,T.viab,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,T.viab),T.noint,T.auto];
+  RECHAZOS.forEach(r=>{const n=r.campanas?.nombre||'—';const c=C[n]=C[n]||{env:MSG[n]||0,leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};c.rech++;const m=(r.motivos_rechazo?.nombre||'');if(/interesa/i.test(m))c.noint++;if(/autom/i.test(m))c.auto++;});
+  // incluir campañas sin leads aún pero con mensajes enviados
+  CAMPANAS.forEach(c=>{if(!C[c.nombre])C[c.nombre]={env:c.mensajes_enviados||0,leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};});
+  const headers=['Campaña','Enviados','Leads','Rechazos','Respuestas','% resp.','Viables','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv.'];
+  const rows=Object.entries(C).map(([n,o])=>{const resp=o.leads+o.rech;return [n,o.env,o.leads,o.rech,resp,pc(resp,o.env),o.viab,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,o.viab)];}).sort((a,b)=>b[2]-a[2]);
+  const T={};['env','leads','rech','viab','nvAd','nvRe','def','vent'].forEach(k=>T[k]=Object.values(C).reduce((s,o)=>s+o[k],0));
+  const respT=T.leads+T.rech;
+  const totalRow=['TOTAL',T.env,T.leads,T.rech,respT,pc(respT,T.env),T.viab,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,T.viab)];
   LAST_TABLA={headers,rows:[...rows,totalRow],name:'Por_campana'};
   return render_atable(headers,rows,totalRow);
 }
@@ -1203,13 +1208,14 @@ function tablaGlobal(){
   const cot=LEADS.filter(l=>l.etapa==='Cotización enviada').length, acel=LEADS.filter(l=>l.etapa==='Aceleración pendiente').length;
   const ine=LEADS.filter(l=>l.etapa==='Falta INE o biométrico').length;
   const rech=RECHAZOS.length, noint=RECHAZOS.filter(r=>/interesa/i.test(r.motivos_rechazo?.nombre||'')).length, auto=RECHAZOS.filter(r=>/autom/i.test(r.motivos_rechazo?.nombre||'')).length;
-  const secc=(t)=>[t,'',''];
-  const fila=(t,v,extra='')=>[t,v,extra];
+  const enviados=CAMPANAS.reduce((s,c)=>s+(c.mensajes_enviados||0),0);
+  const respuestas=total+rech;
   const rows=[
     ['1. ALCANCE Y RESPUESTA','',''],
-    ['Leads positivos (con interés)',total,''],
-    ['Rechazos',rech,''],
-    ['Respuestas totales',total+rech,''],
+    ['Mensajes enviados',enviados,''],
+    ['Leads positivos (con interés)',total,pc(total,enviados)],
+    ['Rechazos',rech,pc(rech,enviados)],
+    ['Respuestas totales',respuestas,pc(respuestas,enviados)],
     ['2. VIABILIDAD',''  ,''],
     ['Con adeudo',conAd,pc(conAd,total)],
     ['Sin adeudo',sinAd,pc(sinAd,total)],
@@ -1231,8 +1237,10 @@ function tablaGlobal(){
     ['No me interesa',noint,''],
     ['Respuesta automática',auto,''],
     ['5. INDICADORES CLAVE','',''],
-    ['Tasa de viabilidad',pc(viab,total),''],
-    ['Tasa de conversión',pc(vent,viab),''],
+    ['Tasa de respuesta (resp./enviados)',pc(respuestas,enviados),''],
+    ['Tasa de viabilidad (viables/leads)',pc(viab,total),''],
+    ['Tasa de conversión (ventas/viables)',pc(vent,viab),''],
+    ['Conversión sobre enviados',pc(vent,enviados),''],
   ];
   const headers=['Indicador','Cantidad','%'];
   LAST_TABLA={headers,rows,name:'Embudo_global'};
