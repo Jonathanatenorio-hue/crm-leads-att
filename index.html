@@ -280,7 +280,7 @@ tbody tr:hover{background:#F7F8FF}
   <div class="main">
     <div class="page-head">
       <div>
-        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Carga del día</button><button data-s="lanzamientos" id="tabLanzamientos" class="hidden">Lanzamientos</button></div>
+        <div class="sectabs hidden" id="sectabs"><button data-s="operacion" class="on" id="tabOperacion">Operación</button><button data-s="dashboard" id="tabDashboard">Dashboard</button><button data-s="asignar" id="tabAsignar">Carga del día</button><button data-s="lanzamientos" id="tabLanzamientos" class="hidden">Lanzamientos</button></div>
         <h1 id="pageTitle">Mi cartera</h1><div class="ph-sub" id="cartSub">Tus leads de campañas de WhatsApp</div>
       </div>
       <button class="btn btn-primary" id="btnNuevo">+ Nuevo lead</button>
@@ -344,7 +344,7 @@ tbody tr:hover{background:#F7F8FF}
           <div id="rzInfo" style="margin-top:16px"></div>
         </div>
       </div>
-      <div class="dash-card" style="margin-top:16px">
+      <div class="dash-card" style="margin-top:16px" id="campCard">
         <h3>Gestionar campañas</h3>
         <div class="dc-sub">Registra una campaña nueva (aparece sola en el combo de captura) y edita los mensajes enviados cuando tengas la cifra.</div>
         <div class="row2" style="margin-bottom:10px">
@@ -588,6 +588,13 @@ async function entrarApp(session){
     $('tabDashboard').classList.toggle('hidden',!['director','supervisor'].includes(agente.rol));
     $('tabAsignar').classList.toggle('hidden',!['director','depurador'].includes(agente.rol));
     $('tabLanzamientos').classList.toggle('hidden',agente.rol!=='director');
+    if(agente.rol==='depurador'){
+      // El depurador solo trabaja con Carga del día y Rechazos
+      $('tabOperacion').classList.add('hidden');
+      $('campCard').classList.add('hidden');   // Gestionar campañas es del director
+      $('btnVerArch').classList.add('hidden');
+      setTimeout(()=>setSeccion('asignar'),0); // aterriza directo en su pantalla
+    }
     if(['director','depurador'].includes(agente.rol)) cargarSelectsAsignar();
   }
   hide($('boot'));hide($('login'));show($('app'));
