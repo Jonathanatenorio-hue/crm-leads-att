@@ -251,6 +251,7 @@ tbody tr:hover{background:#F7F8FF}
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
+      <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
         <button data-v="tabla" class="on">▤ Tabla</button>
         <button data-v="tablero">▦ Tablero</button>
@@ -259,7 +260,7 @@ tbody tr:hover{background:#F7F8FF}
     <div id="kanban" class="kanban hidden"></div>
     <div class="tablecard" id="tablecard">
       <div class="tbl-scroll"><table><thead><tr>
-        <th>Teléfono</th><th>Cliente</th><th>Campaña</th><th>Viabilidad</th><th>Etapa</th><th>Registrado</th>
+        <th>Teléfono</th><th>Cliente</th><th class="col-agente hidden">Agente</th><th>Campaña</th><th>Viabilidad</th><th>Etapa</th><th>Registrado</th>
       </tr></thead><tbody id="tbody"></tbody></table></div>
       <div id="empty" class="empty hidden">
         <div class="ico"><svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></div>
@@ -415,7 +416,7 @@ const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const EMAIL_DOMAIN='@crm.expertcell';
 const db=window.supabase.createClient(SB_URL,SB_KEY);
 
-let AGENTE=null, LEADS=[], CAMPANAS=[], MOTIVOS=[];
+let AGENTE=null, LEADS=[], CAMPANAS=[], MOTIVOS=[], ES_STAFF=false;
 let editId=null;                       // id del lead en edición (null=nuevo)
 let st={adeudo:null,renovable:null,etapa:null,ine:null,faltaQue:null,ineUrl:null};
 
@@ -472,6 +473,9 @@ async function entrarApp(session){
     $('cartSub').textContent='Vista '+agente.rol+' · todos los leads';
     $('pageTitle').textContent=agente.rol==='director'?'Todos los leads':(agente.rol==='depurador'?'Asignación de leads':'Cartera del equipo');
     show($('sectabs'));
+    ES_STAFF=true;
+    document.querySelectorAll('.col-agente').forEach(el=>el.classList.remove('hidden'));
+    show($('filterAgenteWrap'));
     $('tabDashboard').classList.toggle('hidden',!['director','supervisor'].includes(agente.rol));
     $('tabAsignar').classList.toggle('hidden',!['director','depurador'].includes(agente.rol));
     if(['director','depurador'].includes(agente.rol)) cargarSelectsAsignar();
@@ -507,12 +511,15 @@ async function cargarLeads(){
   if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
   const {data,error}=await q;
   if(error){toast('Error al cargar leads',false);return;}
-  LEADS=data||[];refrescar();
+  LEADS=data||[];
+  if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
+    fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;}
+  refrescar();
 }
 
 // ===== RENDER TABLA =====
 function render(){
-  const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value;
+  const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
     if(est==='sin'&&l.viabilidad)return false;
@@ -520,6 +527,7 @@ function render(){
     if(est==='NO VIABLE'&&l.viabilidad!=='NO VIABLE')return false;
     if(est==='Venta exitosa'&&l.etapa!=='Venta exitosa')return false;
     if(est==='Lead caído'&&l.etapa!=='Lead caído')return false;
+    if(agF&&String(l.agente_id)!==agF)return false;
     return true;
   });
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
@@ -531,8 +539,9 @@ function render(){
   hide($('empty'));document.querySelector('table').style.display='';
   rows.forEach(l=>{
     const tr=document.createElement('tr');tr.onclick=()=>abrirDrawer(l);
+    const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
-      <td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad)}</td>
+      ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}</td>`;
     tb.appendChild(tr);
   });
@@ -715,8 +724,10 @@ function refrescar(){ render(); if(vista==='tablero') renderKanban(); }
 
 function renderKanban(){
   const term=$('search').value.trim().toLowerCase();
+  const agF=$('filterAgente')?$('filterAgente').value:'';
   const viables=LEADS.filter(l=>l.viabilidad==='VIABLE' &&
-    (!term || (l.telefono||'').includes(term) || (l.nombre||'').toLowerCase().includes(term)));
+    (!term || (l.telefono||'').includes(term) || (l.nombre||'').toLowerCase().includes(term)) &&
+    (!agF || String(l.agente_id)===agF));
   const cont=$('kanban'); cont.innerHTML='';
   KCOLS.forEach(col=>{
     const items=viables.filter(l=>l.etapa===col.e);
@@ -767,12 +778,32 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
-let AGENTES_MAP={}, CAMP_MAP={}, cargaFilas=null;
+let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], cargaFilas=null;
+// Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
+function resolverAgente(txt){
+  const q=norm(txt);
+  if(!q) return {estado:'vacio'};
+  if(AGENTES_MAP[q]!==undefined) return {estado:'ok',id:AGENTES_MAP[q]};
+  let m=AGENTES_LISTA.filter(a=>a.n.startsWith(q)||a.n.split(' ')[0]===q.split(' ')[0]&&a.n.startsWith(q.split(' ')[0]));
+  // preferir los que empiezan con el texto completo
+  let starts=AGENTES_LISTA.filter(a=>a.n.startsWith(q));
+  if(starts.length===1) return {estado:'ok',id:starts[0].id};
+  if(starts.length>1) return {estado:'ambiguo',opciones:starts.map(a=>a.nombre)};
+  let contains=AGENTES_LISTA.filter(a=>a.n.includes(q));
+  if(contains.length===1) return {estado:'ok',id:contains[0].id};
+  if(contains.length>1) return {estado:'ambiguo',opciones:contains.map(a=>a.nombre)};
+  // por primer nombre
+  let first=AGENTES_LISTA.filter(a=>a.n.split(' ')[0]===q);
+  if(first.length===1) return {estado:'ok',id:first[0].id};
+  if(first.length>1) return {estado:'ambiguo',opciones:first.map(a=>a.nombre)};
+  return {estado:'no'};
+}
 function norm(s){return (s||'').toString().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}
 function fechaISO(v){if(!v)return null;if(v instanceof Date)return v.toISOString().slice(0,10);const s=String(v).trim();const m=s.match(/(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];const d=new Date(s);return isNaN(d)?null:d.toISOString().slice(0,10);}
 async function cargarSelectsAsignar(){
   const {data:ags}=await db.from('agentes').select('id,nombre').eq('rol','agente').eq('activo',true);
-  AGENTES_MAP={};(ags||[]).forEach(a=>AGENTES_MAP[norm(a.nombre)]=a.id);
+  AGENTES_LISTA=(ags||[]).map(a=>({id:a.id,nombre:a.nombre,n:norm(a.nombre)}));
+  AGENTES_MAP={};AGENTES_LISTA.forEach(a=>AGENTES_MAP[a.n]=a.id);
   CAMP_MAP={};CAMPANAS.forEach(c=>CAMP_MAP[norm(c.nombre)]=c.id);
   const oc=CAMPANAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
   $('rzCampana').innerHTML='<option value="">Selecciona…</option>'+oc;
@@ -804,8 +835,11 @@ async function procesarCarga(){
   for(let i=0;i<tels.length;i+=500){const {data}=await db.from('leads').select('tel10').in('tel10',tels.slice(i,i+500));(data||[]).forEach(x=>existentes.add(x.tel10));}
   const porAgente={},noProc=[],nuevos=[],hoy=new Set();
   datos.forEach(d=>{
-    const aId=AGENTES_MAP[norm(d.agente)],cId=CAMP_MAP[norm(d.campana)];
-    if(!aId||!cId){noProc.push({...d,motivo:!aId?'Agente no reconocido':'Campaña no reconocida'});return;}
+    const ra=resolverAgente(d.agente),cId=CAMP_MAP[norm(d.campana)];
+    if(ra.estado==='ambiguo'){noProc.push({...d,motivo:'"'+d.agente+'" es ambiguo ('+ra.opciones.join(' o ')+')'});return;}
+    if(ra.estado!=='ok'){noProc.push({...d,motivo:'Agente no reconocido: "'+d.agente+'"'});return;}
+    if(!cId){noProc.push({...d,motivo:'Campaña no reconocida: "'+d.campana+'"'});return;}
+    const aId=ra.id;
     (porAgente[d.agente]=porAgente[d.agente]||{recibidos:0,yaReg:0,creados:0}).recibidos++;
     if(existentes.has(d.tel10)||hoy.has(d.tel10)){porAgente[d.agente].yaReg++;return;}
     hoy.add(d.tel10);
@@ -828,7 +862,7 @@ async function procesarCarga(){
       <div style="background:var(--amber-soft);color:var(--amber);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${nuevos.length} creados</div>
       ${noProc.length?`<div style="background:var(--red-soft);color:var(--red);padding:9px 15px;border-radius:10px;font-weight:600;font-size:13px">${noProc.length} no procesados</div>`:''}</div>
     <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Agente</th><th style="text-align:right">Recibidos</th><th style="text-align:right">Registró</th><th style="text-align:right">Faltaron</th><th style="text-align:right">Cumplió</th></tr></thead><tbody>${filas}</tbody></table></div>
-    ${noProc.length?`<div class="dash-empty" style="margin-top:10px;color:var(--red)">Revisa nombres: ${[...new Set(noProc.map(n=>n.motivo+' → '+(n.agente||n.campana)))].slice(0,6).join(' · ')}</div>`:''}`;
+    ${noProc.length?`<div class="dash-empty" style="margin-top:10px;color:var(--red)">No procesados: ${[...new Set(noProc.map(n=>n.motivo))].slice(0,6).join(' · ')}</div>`:''}`;
   toast(nuevos.length+' creados · '+(datos.length-nuevos.length)+' ya estaban');
   await cargarLeads();
 }
@@ -959,6 +993,7 @@ $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay'
 $('drSave').onclick=guardar;
 $('notaAdd').onclick=agregarNota;
 $('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);
+$('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarDrawer();});
 
