@@ -624,12 +624,19 @@ async function cargarMotivos(){
   MOTIVOS.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.nombre;s.appendChild(o);});
 }
 async function cargarLeads(){
-  let q=db.from('leads').select('*, campanas(nombre), agentes(nombre)').order('creado_en',{ascending:false});
-  q=VER_ARCH?q.eq('archivado',true):q.or('archivado.is.null,archivado.eq.false');
-  if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
-  const {data,error}=await q;
-  if(error){toast('Error al cargar leads',false);return;}
-  LEADS=data||[];
+  // Paginado: Supabase regresa máximo 1000 filas por consulta
+  const PAGE=1000;let todo=[],desde=0;
+  while(true){
+    let q=db.from('leads').select('*, campanas(nombre), agentes(nombre)').order('creado_en',{ascending:false}).range(desde,desde+PAGE-1);
+    q=VER_ARCH?q.eq('archivado',true):q.or('archivado.is.null,archivado.eq.false');
+    if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
+    const {data,error}=await q;
+    if(error){toast('Error al cargar leads',false);return;}
+    todo=todo.concat(data||[]);
+    if(!data||data.length<PAGE)break;
+    desde+=PAGE;
+  }
+  LEADS=todo;
   if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
     fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;}
   refrescar();
@@ -1077,8 +1084,15 @@ function countUp(el,target,dur=900,suf=''){
   requestAnimationFrame(tick);
 }
 async function cargarRechazos(){
-  const {data}=await db.from('rechazos').select('campana_id, motivo_id, creado_en, campanas(nombre), motivos_rechazo(nombre)');
-  RECHAZOS=data||[];
+  const PAGE=1000;let todo=[],desde=0;
+  while(true){
+    const {data,error}=await db.from('rechazos').select('campana_id, motivo_id, creado_en, fecha_rechazo, campanas(nombre), motivos_rechazo(nombre)').order('creado_en',{ascending:false}).range(desde,desde+PAGE-1);
+    if(error)break;
+    todo=todo.concat(data||[]);
+    if(!data||data.length<PAGE)break;
+    desde+=PAGE;
+  }
+  RECHAZOS=todo;
 }
 // ===== ASISTENTE IA =====
 let CHAT=[];
