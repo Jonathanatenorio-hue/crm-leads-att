@@ -1080,9 +1080,79 @@ async function cargarRechazos(){
   const {data}=await db.from('rechazos').select('campana_id, motivo_id, creado_en, campanas(nombre), motivos_rechazo(nombre)');
   RECHAZOS=data||[];
 }
+let DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};
+let SUPMAP=null;   // agente → supervisor
+async function cargarSupMap(){
+  if(SUPMAP)return;
+  SUPMAP={};
+  try{
+    const [{data:ags},{data:sups}]=await Promise.all([
+      db.from('agentes').select('nombre,supervisor_id'),
+      db.from('supervisores').select('id,nombre')]);
+    const S={};(sups||[]).forEach(s=>S[s.id]=s.nombre);
+    (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];});
+  }catch(e){}
+}
+function rangoFechas(){
+  const hoy=new Date();const iso=q=>q.getFullYear()+'-'+String(q.getMonth()+1).padStart(2,'0')+'-'+String(q.getDate()).padStart(2,'0');
+  const h=iso(hoy);const back=n=>{const x=new Date();x.setDate(x.getDate()-n);return iso(x);};
+  switch(DFILT.per){
+    case 'hoy':return[h,h];
+    case '7d':return[back(6),h];
+    case '14d':return[back(13),h];
+    case 'mes':return[h.slice(0,8)+'01',h];
+    case 'mesant':{const a=new Date(hoy.getFullYear(),hoy.getMonth()-1,1),b=new Date(hoy.getFullYear(),hoy.getMonth(),0);return[iso(a),iso(b)];}
+    case 'rango':return[(DFILT.d1||'0000-01-01'),(DFILT.d2||'9999-12-31')];
+    default:return null;
+  }
+}
+function dashLeads(){
+  const r=rangoFechas();
+  return LEADS.filter(l=>{
+    if(r){const f=(l.creado_en||'').slice(0,10);if(f<r[0]||f>r[1])return false;}
+    if(DFILT.camp&&(l.campanas?.nombre||'')!==DFILT.camp)return false;
+    if(DFILT.ag&&(l.agentes?.nombre||'')!==DFILT.ag)return false;
+    if(DFILT.sup&&(SUPMAP?.[l.agentes?.nombre]||'')!==DFILT.sup)return false;
+    return true;});
+}
+function dashRechazos(){
+  const r=rangoFechas();
+  if(DFILT.ag||DFILT.sup)return [];   // los rechazos no pertenecen a un agente
+  return RECHAZOS.filter(x=>{
+    if(r){const f=(x.fecha_rechazo||x.creado_en||'').slice(0,10);if(f<r[0]||f>r[1])return false;}
+    if(DFILT.camp&&(x.campanas?.nombre||'')!==DFILT.camp)return false;
+    return true;});
+}
+function hayFiltro(){return DFILT.per!=='todo'||DFILT.sup||DFILT.ag||DFILT.camp;}
+function filtroBarHTML(){
+  const ags=[...new Set(LEADS.map(l=>l.agentes?.nombre).filter(Boolean))].sort();
+  const sups=SUPMAP?[...new Set(Object.values(SUPMAP))].sort():[];
+  const camps=[...new Set(LEADS.map(l=>l.campanas?.nombre).filter(Boolean))].sort();
+  const opt=(v,sel,txt)=>`<option value="${v}"${v===sel?' selected':''}>${txt||v}</option>`;
+  return `<div class="dash-card" style="margin-bottom:16px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="field" style="min-width:160px;flex:1"><label>Periodo</label><select id="dfPer">${opt('todo',DFILT.per,'Todo el histórico')}${opt('hoy',DFILT.per,'Hoy')}${opt('7d',DFILT.per,'Últimos 7 días')}${opt('14d',DFILT.per,'Últimos 14 días')}${opt('mes',DFILT.per,'Este mes')}${opt('mesant',DFILT.per,'Mes anterior')}${opt('rango',DFILT.per,'Rango de fechas…')}</select></div>
+    <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD1w"><label>Del</label><input type="date" id="dfD1" value="${DFILT.d1}"></div>
+    <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD2w"><label>Al</label><input type="date" id="dfD2" value="${DFILT.d2}"></div>
+    <div class="field" style="min-width:150px;flex:1"><label>Supervisor</label><select id="dfSup"><option value="">Todos</option>${sups.map(s=>opt(s,DFILT.sup)).join('')}</select></div>
+    <div class="field" style="min-width:150px;flex:1"><label>Agente</label><select id="dfAg"><option value="">Todos</option>${ags.map(a=>opt(a,DFILT.ag)).join('')}</select></div>
+    <div class="field" style="min-width:170px;flex:1"><label>Campaña</label><select id="dfCamp"><option value="">Todas</option>${camps.map(c=>opt(c,DFILT.camp)).join('')}</select></div>
+    <button class="btn btn-ghost" id="dfLimpiar"${hayFiltro()?'':' disabled'}>✕ Limpiar</button>
+  </div>${hayFiltro()?'<div class="hint" style="margin-top:8px">Viendo datos filtrados — los rechazos solo aplican con filtros de periodo/campaña (no pertenecen a un agente).</div>':''}</div>`;
+}
+function wireFiltrosDash(){
+  $('dfPer').onchange=e=>{DFILT.per=e.target.value;if(DFILT.per==='rango'){$('dfD1w').classList.remove('hidden');$('dfD2w').classList.remove('hidden');}else renderDashboard();};
+  $('dfD1').onchange=e=>{DFILT.d1=e.target.value;if(DFILT.d2)renderDashboard();};
+  $('dfD2').onchange=e=>{DFILT.d2=e.target.value;if(DFILT.d1)renderDashboard();};
+  $('dfSup').onchange=e=>{DFILT.sup=e.target.value;renderDashboard();};
+  $('dfAg').onchange=e=>{DFILT.ag=e.target.value;renderDashboard();};
+  $('dfCamp').onchange=e=>{DFILT.camp=e.target.value;renderDashboard();};
+  $('dfLimpiar').onclick=()=>{DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};renderDashboard();};
+}
 async function renderDashboard(){
   const D=$('dashboard');
   await cargarRechazos();
+  await cargarSupMap();
+  const LEADS=dashLeads(), RECHAZOS=dashRechazos();
   const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length;
   const rech=RECHAZOS.length;
@@ -1115,6 +1185,7 @@ async function renderDashboard(){
       <div><h2>Panel de control</h2><div class="dh-sub">Datos en vivo · actualizado ${new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div></div>
       <button class="btn-report" id="btnInforme"><span class="rd"></span>Generar informe en vivo</button>
     </div>
+    ${filtroBarHTML()}
     <div class="kpis6">
       <div class="kpi kpi-pro p1"><div class="kl">Leads</div><div class="kv" data-cu="${total}">0</div><div class="kf">en el sistema</div></div>
       <div class="kpi kpi-pro p2"><div class="kl">Viables</div><div class="kv c" data-cu="${viab}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% del total</div></div>
@@ -1150,6 +1221,7 @@ async function renderDashboard(){
         <button class="btn btn-primary" id="btnReciclar">Extraer y marcar reciclado</button>
       </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`;
 
+  wireFiltrosDash();
   // count-up
   D.querySelectorAll('[data-cu]').forEach(el=>countUp(el,parseInt(el.dataset.cu),1000,el.dataset.suf||''));
   // charts
@@ -1210,6 +1282,7 @@ function pc(n,d){return d>0?Math.round(n/d*100)+'%':'0%';}
 function money(n){return '$'+(n||0).toLocaleString('es-MX',{maximumFractionDigits:0});}
 
 function tablaPorDia(){
+  const LEADS=dashLeads();
   const NDIAS=7;
   const dias=[];for(let i=NDIAS-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dias.push(d.toISOString().slice(0,10));}
   const et=(iso)=>{const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('es-MX',{weekday:'short',day:'2-digit',month:'short'});};
@@ -1227,6 +1300,7 @@ function tablaPorDia(){
   return render_atable(headers,rows,tot);
 }
 function tablaAgente(){
+  const LEADS=dashLeads();
   const A={};
   LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
     a.leads++;
@@ -1243,6 +1317,7 @@ function tablaAgente(){
   return render_atable(headers,rows,totalRow);
 }
 function tablaEmbudo(){
+  const LEADS=dashLeads();
   const A={};
   LEADS.filter(l=>l.viabilidad==='VIABLE').forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{viab:0,et:{}};a.viab++;const e=l.etapa||'Sin trabajar';a.et[e]=(a.et[e]||0)+1;});
   const headers=['Agente','Viables',...ETAPAS_CRM.flatMap(e=>[e,'%'])];
@@ -1253,6 +1328,7 @@ function tablaEmbudo(){
   return render_atable(headers,rows,totalRow);
 }
 function tablaCampana(){
+  const LEADS=dashLeads(), RECHAZOS=dashRechazos();
   // mapa de mensajes enviados por nombre de campaña
   const MSG={};CAMPANAS.forEach(c=>MSG[c.nombre]=c.mensajes_enviados||0);
   const C={};
@@ -1274,6 +1350,7 @@ function tablaCampana(){
   return render_atable(headers,rows,totalRow);
 }
 function tablaGlobal(){
+  const LEADS=dashLeads(), RECHAZOS=dashRechazos();
   const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length;
   const conAd=LEADS.filter(l=>l.adeudo==='Sí').length, sinAd=LEADS.filter(l=>l.adeudo==='No').length;
   const puedeRe=LEADS.filter(l=>l.renovable==='Sí').length, noRe=LEADS.filter(l=>l.renovable==='No').length;
