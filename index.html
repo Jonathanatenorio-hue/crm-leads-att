@@ -134,6 +134,26 @@ tbody tr:hover{background:#F7F8FF}
 .filebtn:hover{border-color:var(--brand);color:var(--brand)}
 .fileok{font-size:12px;color:var(--green);font-weight:600}
 
+.viewswitch{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;margin-left:auto}
+.viewswitch button{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:6px;transition:.15s}
+.viewswitch button.on{background:var(--surface);color:var(--brand);box-shadow:var(--shadow)}
+.kanban{display:flex;gap:14px;overflow-x:auto;padding-bottom:12px}
+.kcol{flex:0 0 262px;background:#FAFBFC;border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;max-height:calc(100vh - 300px)}
+.kcol-head{padding:13px 15px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line2)}
+.kcol-head .kt{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.kcol-head .kt .kd{width:8px;height:8px;border-radius:50%}
+.kcol-head .kc{font-size:11.5px;color:var(--muted);background:var(--surface);border:1px solid var(--line);padding:1px 8px;border-radius:20px;font-weight:700}
+.kcol-body{padding:10px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px;min-height:60px;transition:.12s}
+.kcol-body.dragover{background:var(--brand-soft)}
+.kcard{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:grab;box-shadow:var(--shadow);transition:.12s}
+.kcard:hover{border-color:var(--brand);transform:translateY(-1px)}
+.kcard:active{cursor:grabbing}
+.kcard.dragging{opacity:.4}
+.kcard .ktel{font-weight:600;font-size:13px;font-variant-numeric:tabular-nums}
+.kcard .knom{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kcard .kcamp{font-size:10.5px;color:var(--dim);margin-top:5px}
+.kcard .ktag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;margin-top:7px;background:var(--amber-soft);color:var(--amber)}
+.kempty{font-size:11.5px;color:var(--dim);text-align:center;padding:16px 8px;font-style:italic}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;transition:.25s;z-index:60;pointer-events:none;display:flex;align-items:center;gap:9px}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast.ok{background:#0F2E1B}.toast.ok .td{color:#5EE9A0}.toast .td{color:#8FA0FF;font-weight:700}
@@ -190,8 +210,13 @@ tbody tr:hover{background:#F7F8FF}
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
+      <div class="viewswitch" id="viewswitch">
+        <button data-v="tabla" class="on">▤ Tabla</button>
+        <button data-v="tablero">▦ Tablero</button>
+      </div>
     </div>
-    <div class="tablecard">
+    <div id="kanban" class="kanban hidden"></div>
+    <div class="tablecard" id="tablecard">
       <div class="tbl-scroll"><table><thead><tr>
         <th>Teléfono</th><th>Cliente</th><th>Campaña</th><th>Viabilidad</th><th>Etapa</th><th>Registrado</th>
       </tr></thead><tbody id="tbody"></tbody></table></div>
@@ -380,7 +405,7 @@ async function cargarLeads(){
   if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
   const {data,error}=await q;
   if(error){toast('Error al cargar leads',false);return;}
-  LEADS=data||[];render();
+  LEADS=data||[];refrescar();
 }
 
 // ===== RENDER TABLA =====
@@ -567,6 +592,69 @@ async function subirIne(file){
   st.ineUrl=data.publicUrl;show($('aIneOk'));toast('INE cargado');
 }
 
+// ===== KANBAN =====
+let vista='tabla', dragLeadId=null;
+const KCOLS=[
+  {e:'Cotización enviada',c:'#4F46E5'},{e:'Aceleración pendiente',c:'#D97706'},
+  {e:'Falta INE o biométrico',c:'#0891B2'},{e:'Falta contrato firmado',c:'#7C3AED'},
+  {e:'Falta pago inicial',c:'#DB2777'},{e:'Venta exitosa',c:'#16A34A'},{e:'Lead caído',c:'#DC2626'}
+];
+const REQUIERE_CAMPOS=['Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído'];
+
+function setVista(v){
+  vista=v;
+  $('viewswitch').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  $('tablecard').classList.toggle('hidden',v!=='tabla');
+  $('kanban').classList.toggle('hidden',v!=='tablero');
+  refrescar();
+}
+function refrescar(){ render(); if(vista==='tablero') renderKanban(); }
+
+function renderKanban(){
+  const term=$('search').value.trim().toLowerCase();
+  const viables=LEADS.filter(l=>l.viabilidad==='VIABLE' &&
+    (!term || (l.telefono||'').includes(term) || (l.nombre||'').toLowerCase().includes(term)));
+  const cont=$('kanban'); cont.innerHTML='';
+  KCOLS.forEach(col=>{
+    const items=viables.filter(l=>l.etapa===col.e);
+    const div=document.createElement('div'); div.className='kcol';
+    div.innerHTML=`<div class="kcol-head"><span class="kt"><span class="kd" style="background:${col.c}"></span>${col.e}</span><span class="kc">${items.length}</span></div>`;
+    const body=document.createElement('div'); body.className='kcol-body'; body.dataset.etapa=col.e;
+    if(items.length===0) body.innerHTML='<div class="kempty">Sin leads</div>';
+    items.forEach(l=>{
+      const card=document.createElement('div'); card.className='kcard'; card.draggable=true; card.dataset.id=l.id;
+      let tag='';
+      if(l.etapa==='Aceleración pendiente'&&l.acel_fecha_subir){const f=new Date(l.acel_fecha_subir+'T00:00:00');tag=`<span class="ktag">Subir: ${f.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span>`;}
+      if(l.etapa==='Venta exitosa'&&l.folio_avs)tag=`<span class="ktag" style="background:var(--green-soft);color:var(--green)">${l.folio_avs}</span>`;
+      card.innerHTML=`<div class="ktel">${l.telefono}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${tag}`;
+      card.onclick=()=>abrirDrawer(l);
+      card.addEventListener('dragstart',e=>{dragLeadId=l.id;card.classList.add('dragging');});
+      card.addEventListener('dragend',e=>{card.classList.remove('dragging');});
+      body.appendChild(card);
+    });
+    body.addEventListener('dragover',e=>{e.preventDefault();body.classList.add('dragover');});
+    body.addEventListener('dragleave',e=>{body.classList.remove('dragover');});
+    body.addEventListener('drop',e=>{e.preventDefault();body.classList.remove('dragover');soltarEn(col.e,dragLeadId);});
+    div.appendChild(body); cont.appendChild(div);
+  });
+}
+
+async function soltarEn(etapaDestino,leadId){
+  const lead=LEADS.find(l=>l.id===leadId); if(!lead||lead.etapa===etapaDestino) return;
+  if(REQUIERE_CAMPOS.includes(etapaDestino)){
+    abrirDrawer(lead);
+    st.etapa=etapaDestino;
+    $('etapaGrid').querySelectorAll('.etapa-opt').forEach(x=>x.classList.toggle('sel',x.dataset.v===etapaDestino));
+    showEtapaFields();
+    toast('Completa los datos de "'+etapaDestino+'"');
+  } else {
+    const {error}=await db.from('leads').update({etapa:etapaDestino}).eq('id',leadId);
+    if(error){toast('Error al mover',false);return;}
+    db.from('bitacora_movimientos').insert({lead_id:leadId,agente_id:AGENTE.id,etapa_anterior:lead.etapa,etapa_nueva:etapaDestino,detalle:'Movido en tablero'}).then(()=>{},()=>{});
+    toast('Movido a '+etapaDestino); await cargarLeads();
+  }
+}
+
 // ===== EVENTOS =====
 $('loginBtn').onclick=login;
 $('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
@@ -575,9 +663,10 @@ $('userchip').onclick=e=>{e.stopPropagation();$('userMenu').classList.toggle('op
 document.addEventListener('click',()=>$('userMenu').classList.remove('open'));
 $('btnLogout').onclick=async()=>{await db.auth.signOut();location.reload();};
 $('btnNuevo').onclick=()=>abrirDrawer(null);
+$('viewswitch').querySelectorAll('button').forEach(b=>b.onclick=()=>setVista(b.dataset.v));
 $('drClose').onclick=cerrarDrawer;$('drCancel').onclick=cerrarDrawer;$('overlay').onclick=cerrarDrawer;
 $('drSave').onclick=guardar;
-$('search').addEventListener('input',render);$('filterEstado').addEventListener('change',render);
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);
 $('dTel').addEventListener('input',e=>{e.target.value=e.target.value.replace(/\D/g,'');});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarDrawer();});
 
