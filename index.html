@@ -217,6 +217,18 @@ tbody tr:hover{background:#F7F8FF}
 .pill.g{background:var(--green-soft);color:var(--green)}.pill.a{background:var(--amber-soft);color:var(--amber)}.pill.r{background:var(--red-soft);color:var(--red)}
 @media(max-width:900px){.kpis6{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:560px){.kpis6{grid-template-columns:repeat(2,1fr)}}
+.tbltabs{display:inline-flex;gap:4px;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;flex-wrap:wrap}
+.tbltabs button{padding:7px 13px;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.tbltabs button.on{background:var(--surface);color:var(--brand);box-shadow:var(--shadow)}
+.atable{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+.atable th{text-align:right;font-size:10.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;padding:9px 10px;border-bottom:1px solid var(--line);background:#FCFCFD}
+.atable th:first-child,.atable td:first-child{text-align:left}
+.atable td{padding:9px 10px;border-bottom:1px solid var(--line2);text-align:right;font-variant-numeric:tabular-nums}
+.atable td:first-child{font-weight:600}
+.atable tr:hover td{background:#F7F8FF}
+.atable tr.total td{font-weight:700;background:var(--brand-soft);border-top:2px solid var(--brand)}
+.atable .pct{color:var(--brand)}
+.atable .z{color:var(--dim)}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;transition:.25s;z-index:60;pointer-events:none;display:flex;align-items:center;gap:9px}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast.ok{background:#0F2E1B}.toast.ok .td{color:#5EE9A0}.toast .td{color:#8FA0FF;font-weight:700}
@@ -990,10 +1002,17 @@ async function renderDashboard(){
       <div class="dash-card"><h3>Distribución del pipeline</h3><div class="dc-sub">Leads viables por etapa</div><div class="chart-wrap"><canvas id="chPipeline"></canvas></div></div>
     </div>
     <div class="dash-card span2" style="margin-bottom:16px"><h3>Tendencia de los últimos 14 días</h3><div class="dc-sub">Leads registrados vs ventas cerradas</div><div class="chart-wrap sm"><canvas id="chTendencia"></canvas></div></div>
-    <div class="dash-card span2" style="margin-bottom:16px"><h3>Calidad por campaña</h3><div class="dc-sub">Qué base rinde mejor y cuál está más quemada</div>
-      <div style="overflow-x:auto"><table class="qtable"><thead><tr><th>Campaña</th><th class="num">Leads</th><th class="num">Viables</th><th class="num">Ventas</th><th class="num">Rechazos</th><th class="num">Tasa rechazo</th></tr></thead><tbody>
-      ${campRows.map(c=>{const cl=c.tasa<20?'g':(c.tasa<40?'a':'r');return `<tr><td style="font-weight:600">${c.n}</td><td class="num">${c.leads}</td><td class="num" style="color:var(--cyan)">${c.viab}</td><td class="num" style="color:var(--green)">${c.vent}</td><td class="num" style="color:var(--red)">${c.rech}</td><td class="num"><span class="pill ${cl}">${c.tasa}%</span></td></tr>`;}).join('')||'<tr><td colspan="6" class="dash-empty">Sin datos aún.</td></tr>'}
-      </tbody></table></div></div>
+    <div class="dash-card span2" style="margin-bottom:16px">
+      <div class="dash-head" style="margin-bottom:14px"><div><h3>Tablas analíticas</h3><div class="dc-sub">El mismo detalle de tu Excel de leads · en vivo</div></div>
+        <button class="btn btn-ghost" id="btnExportTabla">⬇ Exportar Excel</button></div>
+      <div class="tbltabs" id="tbltabs">
+        <button data-t="agente" class="on">Resumen por agente</button>
+        <button data-t="embudo">Embudo por agente</button>
+        <button data-t="campana">Por campaña</button>
+        <button data-t="global">Embudo global</button>
+      </div>
+      <div id="tablaCont" style="overflow-x:auto;margin-top:14px"></div>
+    </div>
     <div class="dash-card" style="margin-bottom:16px"><h3>⚠️ Leads sin movimiento (+24h)</h3><div class="dc-sub">Seguimiento pendiente · ${parados.length} en alerta</div>
       ${parados.length?parados.map(l=>{const h=Math.round((ahora-new Date(l.ultimo_movimiento).getTime())/36e5);return `<div class="alert-row"><div><span class="al-tel">${l.telefono}</span> <span class="al-nom">${l.nombre||''} · ${l.etapa}${ES_STAFF&&l.agentes?.nombre?' · '+l.agentes.nombre:''}</span></div><span class="al-h">${h}h sin mover</span></div>`;}).join(''):'<div class="dash-empty">Todo con seguimiento al día. 🎉</div>'}</div>
     <div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
@@ -1026,6 +1045,9 @@ async function renderDashboard(){
 
   $('btnReciclar').onclick=reciclar;
   $('btnInforme').onclick=generarInforme;
+  $('tbltabs').querySelectorAll('button').forEach(b=>b.onclick=()=>renderTablas(b.dataset.t));
+  $('btnExportTabla').onclick=exportTabla;
+  renderTablas('agente');
   actualizarRecInfo();
 }
 function actualizarRecInfo(){
@@ -1053,6 +1075,122 @@ async function reciclar(){
   await cargarLeads(); renderDashboard();
 }
 
+let LAST_TABLA={headers:[],rows:[],name:'tabla'};
+const ETAPAS_CRM=['Venta exitosa','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Lead caído','Sin trabajar'];
+function pc(n,d){return d>0?Math.round(n/d*100)+'%':'0%';}
+function money(n){return '$'+(n||0).toLocaleString('es-MX',{maximumFractionDigits:0});}
+
+function tablaAgente(){
+  const A={};
+  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
+    a.leads++;
+    if(l.viabilidad==='VIABLE')a.viab++;
+    else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')a.nvAd++;else a.nvRe++;}
+    else a.def++;
+    if(l.etapa==='Venta exitosa')a.vent++;
+    a.adeudo+=(l.monto_adeudo||0);});
+  const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,o.viab),money(o.adeudo)]).sort((a,b)=>b[7]-a[7]||b[2]-a[2]);
+  const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
+  const totalRow=['TOTAL',T.leads,T.viab,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,T.viab),money(T.adeudo)];
+  const headers=['Agente','Leads','Viables','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv.','Adeudo ($)'];
+  LAST_TABLA={headers,rows:[...rows,totalRow],name:'Resumen_por_agente'};
+  return render_atable(headers,rows,totalRow);
+}
+function tablaEmbudo(){
+  const A={};
+  LEADS.filter(l=>l.viabilidad==='VIABLE').forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{viab:0,et:{}};a.viab++;const e=l.etapa||'Sin trabajar';a.et[e]=(a.et[e]||0)+1;});
+  const headers=['Agente','Viables',...ETAPAS_CRM.flatMap(e=>[e,'%'])];
+  const rows=Object.entries(A).map(([n,o])=>{const r=[n,o.viab];ETAPAS_CRM.forEach(e=>{const c=o.et[e]||0;r.push(c,pc(c,o.viab));});return r;}).sort((a,b)=>b[1]-a[1]);
+  const T={viab:0,et:{}};Object.values(A).forEach(o=>{T.viab+=o.viab;ETAPAS_CRM.forEach(e=>T.et[e]=(T.et[e]||0)+(o.et[e]||0));});
+  const totalRow=['TOTAL',T.viab,...ETAPAS_CRM.flatMap(e=>[T.et[e]||0,pc(T.et[e]||0,T.viab)])];
+  LAST_TABLA={headers,rows:[...rows,totalRow],name:'Embudo_por_agente'};
+  return render_atable(headers,rows,totalRow);
+}
+function tablaCampana(){
+  const C={};
+  LEADS.forEach(l=>{const n=l.campanas?.nombre||'—';const c=C[n]=C[n]||{leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};
+    c.leads++;
+    if(l.viabilidad==='VIABLE')c.viab++;
+    else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')c.nvAd++;else c.nvRe++;}
+    else c.def++;
+    if(l.etapa==='Venta exitosa')c.vent++;});
+  RECHAZOS.forEach(r=>{const n=r.campanas?.nombre||'—';const c=C[n]=C[n]||{leads:0,rech:0,viab:0,nvAd:0,nvRe:0,def:0,vent:0,noint:0,auto:0};c.rech++;const m=(r.motivos_rechazo?.nombre||'');if(/interesa/i.test(m))c.noint++;if(/autom/i.test(m))c.auto++;});
+  const headers=['Campaña','Leads','Rechazos','Respuestas','Viables','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv.','No interesa','Resp. autom.'];
+  const rows=Object.entries(C).map(([n,o])=>{const resp=o.leads+o.rech;return [n,o.leads,o.rech,resp,o.viab,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,o.viab),o.noint,o.auto];}).sort((a,b)=>b[1]-a[1]);
+  const T={};['leads','rech','viab','nvAd','nvRe','def','vent','noint','auto'].forEach(k=>T[k]=Object.values(C).reduce((s,o)=>s+o[k],0));
+  const totalRow=['TOTAL',T.leads,T.rech,T.leads+T.rech,T.viab,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,T.viab),T.noint,T.auto];
+  LAST_TABLA={headers,rows:[...rows,totalRow],name:'Por_campana'};
+  return render_atable(headers,rows,totalRow);
+}
+function tablaGlobal(){
+  const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length;
+  const conAd=LEADS.filter(l=>l.adeudo==='Sí').length, sinAd=LEADS.filter(l=>l.adeudo==='No').length;
+  const puedeRe=LEADS.filter(l=>l.renovable==='Sí').length, noRe=LEADS.filter(l=>l.renovable==='No').length;
+  const nvAd=LEADS.filter(l=>l.viabilidad==='NO VIABLE'&&l.adeudo==='Sí').length;
+  const nvRe=LEADS.filter(l=>l.viabilidad==='NO VIABLE'&&l.adeudo!=='Sí').length;
+  const def=LEADS.filter(l=>!l.viabilidad).length;
+  const adeudoTot=LEADS.reduce((s,l)=>s+(l.monto_adeudo||0),0);
+  const vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length, caido=LEADS.filter(l=>l.etapa==='Lead caído').length;
+  const cot=LEADS.filter(l=>l.etapa==='Cotización enviada').length, acel=LEADS.filter(l=>l.etapa==='Aceleración pendiente').length;
+  const ine=LEADS.filter(l=>l.etapa==='Falta INE o biométrico').length;
+  const rech=RECHAZOS.length, noint=RECHAZOS.filter(r=>/interesa/i.test(r.motivos_rechazo?.nombre||'')).length, auto=RECHAZOS.filter(r=>/autom/i.test(r.motivos_rechazo?.nombre||'')).length;
+  const secc=(t)=>[t,'',''];
+  const fila=(t,v,extra='')=>[t,v,extra];
+  const rows=[
+    ['1. ALCANCE Y RESPUESTA','',''],
+    ['Leads positivos (con interés)',total,''],
+    ['Rechazos',rech,''],
+    ['Respuestas totales',total+rech,''],
+    ['2. VIABILIDAD',''  ,''],
+    ['Con adeudo',conAd,pc(conAd,total)],
+    ['Sin adeudo',sinAd,pc(sinAd,total)],
+    ['Pueden renovar',puedeRe,pc(puedeRe,total)],
+    ['No pueden (renovó)',noRe,pc(noRe,total)],
+    ['VIABLES',viab,pc(viab,total)],
+    ['NO VIABLES (total)',nvAd+nvRe,pc(nvAd+nvRe,total)],
+    ['   · por adeudo',nvAd,''],
+    ['   · por renovó',nvRe,''],
+    ['POR DEFINIR',def,pc(def,total)],
+    ['Monto total de adeudo',money(adeudoTot),''],
+    ['3. EMBUDO (solo viables)','',''],
+    ['Cotización enviada',cot,pc(cot,viab)],
+    ['Aceleración pendiente',acel,pc(acel,viab)],
+    ['Falta INE o biométrico',ine,pc(ine,viab)],
+    ['Venta',vent,pc(vent,viab)],
+    ['Lead caído',caido,pc(caido,viab)],
+    ['4. RECHAZOS (desglose)','',''],
+    ['No me interesa',noint,''],
+    ['Respuesta automática',auto,''],
+    ['5. INDICADORES CLAVE','',''],
+    ['Tasa de viabilidad',pc(viab,total),''],
+    ['Tasa de conversión',pc(vent,viab),''],
+  ];
+  const headers=['Indicador','Cantidad','%'];
+  LAST_TABLA={headers,rows,name:'Embudo_global'};
+  let body=rows.map(r=>{const esSec=/^[0-9]\./.test(r[0]);return `<tr${esSec?' class="total"':''}><td>${r[0]}</td><td>${r[1]}</td><td class="pct">${r[2]}</td></tr>`;}).join('');
+  return `<table class="atable"><thead><tr><th>Indicador</th><th>Cantidad</th><th>%</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function render_atable(headers,rows,totalRow){
+  const th=headers.map((h,i)=>`<th${i===0?'':''}>${h}</th>`).join('');
+  const body=rows.map(r=>'<tr>'+r.map((c,i)=>`<td${String(c).includes('%')?' class="pct"':(c===0?' class="z"':'')}>${c}</td>`).join('')+'</tr>').join('');
+  const tot=totalRow?'<tr class="total">'+totalRow.map(c=>`<td>${c}</td>`).join('')+'</tr>':'';
+  return `<table class="atable"><thead><tr>${th}</tr></thead><tbody>${body}${tot}</tbody></table>`;
+}
+function renderTablas(which){
+  $('tbltabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.t===which));
+  const c=$('tablaCont');
+  if(which==='agente')c.innerHTML=tablaAgente();
+  else if(which==='embudo')c.innerHTML=tablaEmbudo();
+  else if(which==='campana')c.innerHTML=tablaCampana();
+  else c.innerHTML=tablaGlobal();
+}
+function exportTabla(){
+  const {headers,rows,name}=LAST_TABLA;
+  const aoa=[headers,...rows];
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));
+  XLSX.writeFile(wb,name+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
 async function generarInforme(){
   toast('Generando informe…');
   await cargarRechazos();
