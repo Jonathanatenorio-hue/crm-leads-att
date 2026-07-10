@@ -229,6 +229,16 @@ tbody tr:hover{background:#F7F8FF}
 .atable tr.total td{font-weight:700;background:var(--brand-soft);border-top:2px solid var(--brand)}
 .atable .pct{color:var(--brand)}
 .atable .z{color:var(--dim)}
+.menu .sep{height:1px;background:var(--line2);margin:5px 0}
+.mp-overlay{position:fixed;inset:0;background:rgba(16,24,40,.45);backdrop-filter:blur(3px);z-index:70;display:none;align-items:center;justify-content:center;padding:24px}
+.mp-overlay.open{display:flex}
+.mp-card{background:var(--surface);border-radius:18px;box-shadow:var(--shadow-lg);width:100%;max-width:380px;padding:26px}
+.mp-card h3{font-family:'Space Grotesk';font-size:18px;font-weight:600;margin-bottom:4px}
+.mp-card .mp-sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+.mp-msg{font-size:12.5px;margin-top:8px;display:none}
+.mp-msg.err{display:block;color:var(--red)}
+.mp-msg.ok{display:block;color:var(--green)}
+.mp-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:#fff;padding:12px 20px;border-radius:12px;font-size:13.5px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;transition:.25s;z-index:60;pointer-events:none;display:flex;align-items:center;gap:9px}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .toast.ok{background:#0F2E1B}.toast.ok .td{color:#5EE9A0}.toast .td{color:#8FA0FF;font-weight:700}
@@ -264,7 +274,7 @@ tbody tr:hover{background:#F7F8FF}
     <div class="userchip" id="userchip">
       <div class="ui"><div class="un" id="uName">—</div><div class="ur" id="uRole">—</div></div>
       <div class="av" id="uAvatar">—</div>
-      <div class="menu" id="userMenu"><button id="btnLogout">Cerrar sesión</button></div>
+      <div class="menu" id="userMenu"><button id="btnChangePass">Cambiar contraseña</button><div class="sep"></div><button id="btnLogout">Cerrar sesión</button></div>
     </div>
   </div>
   <div class="main">
@@ -447,6 +457,19 @@ tbody tr:hover{background:#F7F8FF}
   </div>
 </div>
 
+<div class="mp-overlay" id="mpOverlay">
+  <div class="mp-card">
+    <h3>Cambiar contraseña</h3>
+    <div class="mp-sub">Escribe tu nueva contraseña (mínimo 6 caracteres).</div>
+    <div class="field"><label>Nueva contraseña</label><input id="mpPass1" type="password" placeholder="••••••••"></div>
+    <div class="field"><label>Confirmar contraseña</label><input id="mpPass2" type="password" placeholder="••••••••"></div>
+    <div class="mp-msg" id="mpMsg"></div>
+    <div class="mp-foot">
+      <button class="btn btn-ghost" id="mpCancel">Cancelar</button>
+      <button class="btn btn-primary" id="mpSave">Guardar</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1296,6 +1319,21 @@ new Chart(document.getElementById('a'),{type:'bar',data:{labels:D.agL,datasets:[
   if(!w){toast('Permite ventanas emergentes para ver el informe',false);return;}
   w.document.write(html);w.document.close();
 }
+// ===== CAMBIAR CONTRASEÑA =====
+function abrirPass(){$('mpPass1').value='';$('mpPass2').value='';$('mpMsg').className='mp-msg';$('mpOverlay').classList.add('open');$('userMenu').classList.remove('open');setTimeout(()=>$('mpPass1').focus(),50);}
+function cerrarPass(){$('mpOverlay').classList.remove('open');}
+async function cambiarPass(){
+  const p1=$('mpPass1').value,p2=$('mpPass2').value,m=$('mpMsg');
+  if(p1.length<6){m.textContent='La contraseña debe tener al menos 6 caracteres.';m.className='mp-msg err';return;}
+  if(p1!==p2){m.textContent='Las contraseñas no coinciden.';m.className='mp-msg err';return;}
+  const b=$('mpSave');b.disabled=true;b.innerHTML='<span class="loader"></span>';
+  const {error}=await db.auth.updateUser({password:p1});
+  b.disabled=false;b.textContent='Guardar';
+  if(error){m.textContent='Error: '+error.message;m.className='mp-msg err';return;}
+  m.textContent='✓ Contraseña actualizada.';m.className='mp-msg ok';
+  toast('Contraseña actualizada');
+  setTimeout(cerrarPass,1200);
+}
 // ===== EVENTOS =====
 $('loginBtn').onclick=login;
 $('loginPass').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
@@ -1303,6 +1341,10 @@ $('loginUser').addEventListener('keydown',e=>{if(e.key==='Enter')$('loginPass').
 $('userchip').onclick=e=>{e.stopPropagation();$('userMenu').classList.toggle('open');};
 document.addEventListener('click',()=>$('userMenu').classList.remove('open'));
 $('btnLogout').onclick=async()=>{await db.auth.signOut();location.reload();};
+$('btnChangePass').onclick=abrirPass;
+$('mpCancel').onclick=cerrarPass;
+$('mpSave').onclick=cambiarPass;
+$('mpOverlay').addEventListener('click',e=>{if(e.target===$('mpOverlay'))cerrarPass();});
 $('btnNuevo').onclick=()=>abrirDrawer(null);
 $('viewswitch').querySelectorAll('button').forEach(b=>b.onclick=()=>setVista(b.dataset.v));
 $('sectabs').querySelectorAll('button').forEach(b=>b.onclick=()=>setSeccion(b.dataset.s));
