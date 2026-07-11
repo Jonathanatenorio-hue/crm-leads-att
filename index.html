@@ -564,6 +564,7 @@ async function agregarNota(){
   b.disabled=false;b.textContent='Agregar';
   if(error){toast('Error al guardar nota',false);return;}
   $('notaTxt').value=''; cargarHistorial(editId); toast('Nota agregada');
+  const li=LEADS.find(l=>l.id===editId);if(li){li._nota=txt;render();}
 }
 
 const ETAPAS=[
@@ -651,6 +652,17 @@ async function cargarLeads(){
     desde+=PAGE;
   }
   LEADS=todo;
+  // última nota de cada lead (para verla sin abrir el registro)
+  try{
+    const PAGE=1000;let d0=0;const nm={};
+    while(true){
+      const {data:ns,error:ne}=await db.from('lead_notas').select('lead_id,nota,creado_en').order('creado_en',{ascending:false}).range(d0,d0+PAGE-1);
+      if(ne)break;
+      (ns||[]).forEach(n=>{if(nm[n.lead_id]===undefined)nm[n.lead_id]=n.nota;});
+      if(!ns||ns.length<PAGE)break;d0+=PAGE;
+    }
+    LEADS.forEach(l=>l._nota=nm[l.id]||null);
+  }catch(e){}
   if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
     fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;}
   refrescar();
@@ -679,7 +691,8 @@ function render(){
   rows.forEach(l=>{
     const tr=document.createElement('tr');tr.onclick=()=>abrirDrawer(l);
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
-    const comTip=l.comentarios?' <span title="'+String(l.comentarios).replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
+    const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
+    const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
     const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad)}</td>
@@ -922,7 +935,8 @@ function renderKanban(){
       if(l.etapa==='Aceleración pendiente'&&l.acel_fecha_subir){const f=new Date(l.acel_fecha_subir+'T00:00:00');tag=`<span class="ktag">Subir: ${f.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span>`;}
       if(l.etapa==='Venta exitosa'&&l.folio_avs)tag=`<span class="ktag" style="background:var(--green-soft);color:var(--green)">${l.folio_avs}</span>`;
       const dv=l.lead_padre_id?'<span title="Lead derivado" style="font-size:11px"> 🔗</span>':'';
-      const kcom=l.comentarios?`<div class="kcamp" style="font-style:italic" title="${String(l.comentarios).replace(/"/g,'&quot;').replace(/</g,'&lt;')}">💬 ${String(l.comentarios).slice(0,48)}${l.comentarios.length>48?'…':''}</div>`:'';
+      const ktxt=l._nota||l.comentarios;
+      const kcom=ktxt?`<div class="kcamp" style="font-style:italic" title="${String(ktxt).replace(/"/g,'&quot;').replace(/</g,'&lt;')}">💬 ${String(ktxt).slice(0,48)}${String(ktxt).length>48?'…':''}</div>`:'';
       card.innerHTML=`<div class="ktel">${l.telefono}${dv}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${kcom}${tag}`;
       card.onclick=()=>abrirDrawer(l);
       card.addEventListener('dragstart',e=>{dragLeadId=l.id;card.classList.add('dragging');});
