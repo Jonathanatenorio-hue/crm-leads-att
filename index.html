@@ -3499,6 +3499,12 @@ async function cotGenerarPDF(){
   try{
     const dias=parseInt($('cotValidez').value)||7;
     const now=new Date();
+    // folio consecutivo real: consultar cotizaciones previas de este agente hoy
+    try{
+      const hoy0=new Date();hoy0.setHours(0,0,0,0);
+      const {data:fs}=await db.from('cotizaciones').select('folio').eq('agente_id',AGENTE.id).gte('creado_en',hoy0.toISOString());
+      state.cotizaciones=(fs||[]).map(f=>({folio:f.folio}));
+    }catch(e){state.cotizaciones=[];}
     const cot={folio:generateFolio(),fecha:formatDate(now),validoHasta:formatDate(new Date(now.getTime()+dias*86400000)),
       diasValidez:dias,cliente:{nombre:COT_LEAD.nombre||'',telefono:COT_LEAD.telefono||'',email:'',direccion:''},
       ejecutivo:{...state.agente},planActual:null,
@@ -3525,7 +3531,7 @@ async function cargarCotsLead(leadId){
   if(!data||!data.length){cont.innerHTML='';return;}
   cont.innerHTML='<div style="font-weight:700;font-size:13px;margin:10px 0 6px">💲 Cotizaciones ('+data.length+')</div>'+
     data.map(c=>`<div style="display:flex;justify-content:space-between;font-size:12.5px;padding:6px 10px;background:var(--bg-soft,#F3F4F6);border-radius:8px;margin-bottom:4px">
-      <span>${c.folio} · ${fechaCorta(c.creado_en)} · ${(c.datos?.items||[]).length} item(s)</span>
+      <span>${c.folio} · ${fechaCorta(c.creado_en)} ${new Date(c.creado_en).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})} · ${(c.datos?.items||[]).length} item(s)</span>
       <button class="btn btn-ghost" style="padding:1px 8px;font-size:11px" onclick='buildAndDownloadPDF(${JSON.stringify(c.datos).replace(/'/g,"&#39;")})'>⬇ PDF</button></div>`).join('');
 }
 
