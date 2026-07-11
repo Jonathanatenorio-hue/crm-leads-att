@@ -595,10 +595,10 @@ async function entrarApp(session){
       $('btnVerArch').classList.add('hidden');
       setTimeout(()=>setSeccion('asignar'),0); // aterriza directo en su pantalla
     }
-    if(['director','depurador'].includes(agente.rol)) cargarSelectsAsignar();
   }
   hide($('boot'));hide($('login'));show($('app'));
   await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads()]);
+  if(['director','depurador'].includes(AGENTE.rol)) await cargarSelectsAsignar();
   buildEtapas();
 }
 async function login(){
