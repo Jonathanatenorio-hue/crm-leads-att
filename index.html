@@ -3427,6 +3427,7 @@ function cotOnListaLista(){const s=$('cotSub');if(s)s.textContent='Lista: '+stat
 let COT_LEAD=null, COT_DEV=null;
 async function abrirCotizador(lead){
   COT_LEAD=lead;state.items=[];COT_DEV=null;
+  state.agente={nombre:AGENTE.nombre,attuid:(AGENTE.correo||AGENTE.usuario||'EC').split('@')[0].toUpperCase(),whatsapp:AGENTE.telefono||'',telefono:AGENTE.telefono||''};
   $('cotCliente').textContent=(lead.nombre||lead.telefono);
   $('cotBuscar').value='';$('cotResultados').innerHTML='';$('cotConfig').classList.add('hidden');
   $('cotSoloPlanSel').classList.add('hidden');cotRenderItems();
@@ -3500,7 +3501,7 @@ async function cotGenerarPDF(){
     const now=new Date();
     const cot={folio:generateFolio(),fecha:formatDate(now),validoHasta:formatDate(new Date(now.getTime()+dias*86400000)),
       diasValidez:dias,cliente:{nombre:COT_LEAD.nombre||'',telefono:COT_LEAD.telefono||'',email:'',direccion:''},
-      ejecutivo:{nombre:AGENTE.nombre,telefono:''},planActual:null,
+      ejecutivo:{...state.agente},planActual:null,
       items:state.items.map(it=>({...it})),estatus:'enviada',createdAt:now.toISOString()};
     buildAndDownloadPDF_v2(cot);
     const datos={...cot};datos.items=datos.items.map(it=>{const c={...it};delete c.imageData;delete c.deviceImgUrl;return c;});
