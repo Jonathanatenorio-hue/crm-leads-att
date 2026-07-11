@@ -307,6 +307,7 @@ tbody tr:hover{background:#F7F8FF}
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
+      <div class="selectwrap"><select id="filterEtapa"><option value="">Todas las etapas</option><option value="__sin__">Sin tipificar</option></select></div>
       <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
         <button data-v="tabla" class="on">▤ Tabla</button>
@@ -724,6 +725,7 @@ async function cargarLeads(){
 // ===== RENDER TABLA =====
 function render(){
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
+  const etF=$('filterEtapa')?$('filterEtapa').value:'';
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
     if(est==='sin'&&l.viabilidad)return false;
@@ -732,6 +734,8 @@ function render(){
     if(est==='Venta exitosa'&&l.etapa!=='Venta exitosa')return false;
     if(est==='Lead caído'&&l.etapa!=='Lead caído')return false;
     if(agF&&String(l.agente_id)!==agF)return false;
+    if(etF==='__sin__'&&l.etapa)return false;
+    if(etF&&etF!=='__sin__'&&l.etapa!==etF)return false;
     return true;
   });
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
@@ -748,16 +752,34 @@ function render(){
     const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
     const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
-      ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad)}</td>
+      ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}</td>`;
     tb.appendChild(tr);
   });
 }
-function viabBadge(v){if(v==='VIABLE')return '<span class="badge b-viable"><span class="d"></span>Viable</span>';if(v==='NO VIABLE')return '<span class="badge b-noviable"><span class="d"></span>No viable</span>';return '<span class="badge b-pend"><span class="d"></span>Sin evaluar</span>';}
+function motivoNoViab(l){
+  if(l.viabilidad!=='NO VIABLE')return '';
+  const m=[];
+  if(l.adeudo==='Sí')m.push('Adeudo'+(l.monto_adeudo>0?' $'+Number(l.monto_adeudo).toLocaleString('es-MX'):''));
+  if(l.linea_prepago)m.push('Línea prepago/cancelada');
+  if(l.renovable==='No')m.push('Renovó reciente'+(l.fecha_renovo?' ('+fechaCorta(l.fecha_renovo)+')':''));
+  return m.join(' + ')||'Sin detalle';
+}
+function adeudoChico(l){return l.adeudo==='Sí'&&l.monto_adeudo>0&&l.monto_adeudo<1000;}
+function viabBadge(v,l){
+  if(v==='NO VIABLE'&&l){
+    const chico=adeudoChico(l)?' <span class="badge" style="background:#FEF3C7;color:#92400E;font-size:10px;padding:2px 7px" title="Adeudo menor a $1,000 — recuperable">💰 &lt;$1k</span>':'';
+    return '<span class="badge b-noviable" style="cursor:help" title="'+motivoNoViab(l).replace(/"/g,'&quot;')+'"><span class="d"></span>No viable</span>'+chico;
+  }
+  return _viabBadge0(v);
+}
+function _viabBadge0(v){if(v==='VIABLE')return '<span class="badge b-viable"><span class="d"></span>Viable</span>';if(v==='NO VIABLE')return '<span class="badge b-noviable"><span class="d"></span>No viable</span>';return '<span class="badge b-pend"><span class="d"></span>Sin evaluar</span>';}
 function etapaBadge(e){if(!e)return '<span class="muted-cell">—</span>';if(e==='Venta exitosa')return '<span class="badge b-venta">'+e+'</span>';if(e==='Lead caído')return '<span class="badge b-caido">'+e+'</span>';if(e==='Aceleración pendiente')return '<span class="badge b-acel">'+e+'</span>';return '<span class="badge b-etapa">'+e+'</span>';}
 
 // ===== ETAPAS UI =====
 function buildEtapas(){
+  const fe=$('filterEtapa');
+  if(fe&&fe.options.length<=2)ETAPAS.forEach(e=>{const o=document.createElement('option');o.value=e.v;o.textContent=e.v;fe.appendChild(o);});
   const g=$('etapaGrid');g.innerHTML='';
   ETAPAS.forEach(e=>{
     const b=document.createElement('button');b.className='etapa-opt';b.dataset.v=e.v;
@@ -991,9 +1013,10 @@ function renderKanban(){
       if(l.etapa==='Aceleración pendiente'&&l.acel_fecha_subir){const f=new Date(l.acel_fecha_subir+'T00:00:00');tag=`<span class="ktag">Subir: ${f.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span>`;}
       if(l.etapa==='Venta exitosa'&&l.folio_avs)tag=`<span class="ktag" style="background:var(--green-soft);color:var(--green)">${l.folio_avs}</span>`;
       const dv=l.lead_padre_id?'<span title="Lead derivado" style="font-size:11px"> 🔗</span>':'';
+      const kchico=adeudoChico(l)?'<span class="badge" style="background:#FEF3C7;color:#92400E;font-size:10px;padding:1px 6px;margin-left:4px" title="Adeudo menor a $1,000 — recuperable">💰 &lt;$1k</span>':'';
       const ktxt=l._nota||l.comentarios;
       const kcom=ktxt?`<div class="kcamp" style="font-style:italic" title="${String(ktxt).replace(/"/g,'&quot;').replace(/</g,'&lt;')}">💬 ${String(ktxt).slice(0,48)}${String(ktxt).length>48?'…':''}</div>`:'';
-      card.innerHTML=`<div class="ktel">${l.telefono}${dv}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${kcom}${tag}`;
+      card.innerHTML=`<div class="ktel">${l.telefono}${dv}${kchico}</div><div class="knom">${l.nombre||'Sin nombre'}</div><div class="kcamp">${l.campanas?.nombre||''}</div>${kcom}${tag}`;
       card.onclick=()=>abrirDrawer(l);
       card.addEventListener('dragstart',e=>{dragLeadId=l.id;card.classList.add('dragging');});
       card.addEventListener('dragend',e=>{card.classList.remove('dragging');});
@@ -3575,7 +3598,7 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',render);
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
