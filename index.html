@@ -967,6 +967,18 @@ function resolverAgente(txt){
   if(contains.length===1) return {estado:'ok',id:contains[0].id};
   if(contains.length>1) return {estado:'ambiguo',opciones:contains.map(a=>a.nombre)};
   // por primer nombre
+  // por nombre completo del CRM
+  let nc=AGENTES_LISTA.filter(a=>a.nc&&(a.nc.startsWith(q)||a.nc.includes(q)||q.startsWith(a.nc)));
+  if(nc.length===1) return {estado:'ok',id:nc[0].id};
+  if(nc.length>1) return {estado:'ambiguo',opciones:nc.map(a=>a.nombre)};
+  // por tokens: todas las palabras del nombre del CRM están en el texto (o viceversa)
+  const qt=q.split(' ').filter(Boolean);
+  let tok=AGENTES_LISTA.filter(a=>{
+    const at=a.n.split(' ').filter(Boolean), act=(a.nc||'').split(' ').filter(Boolean);
+    return (at.length>1&&at.every(w=>qt.includes(w)))||(act.length>1&&qt.every(w=>act.includes(w)));
+  });
+  if(tok.length===1) return {estado:'ok',id:tok[0].id};
+  if(tok.length>1) return {estado:'ambiguo',opciones:tok.map(a=>a.nombre)};
   let first=AGENTES_LISTA.filter(a=>a.n.split(' ')[0]===q);
   if(first.length===1) return {estado:'ok',id:first[0].id};
   if(first.length>1) return {estado:'ambiguo',opciones:first.map(a=>a.nombre)};
@@ -975,9 +987,9 @@ function resolverAgente(txt){
 function norm(s){return (s||'').toString().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}
 function fechaISO(v){if(!v)return null;if(v instanceof Date)return v.toISOString().slice(0,10);const s=String(v).trim();const m=s.match(/(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];const d=new Date(s);return isNaN(d)?null:d.toISOString().slice(0,10);}
 async function cargarSelectsAsignar(){
-  const {data:ags}=await db.from('agentes').select('id,nombre').eq('rol','agente').eq('activo',true);
-  AGENTES_LISTA=(ags||[]).map(a=>({id:a.id,nombre:a.nombre,n:norm(a.nombre)}));
-  AGENTES_MAP={};AGENTES_LISTA.forEach(a=>AGENTES_MAP[a.n]=a.id);
+  const {data:ags}=await db.from('agentes').select('id,nombre,nombre_completo').eq('rol','agente').eq('activo',true);
+  AGENTES_LISTA=(ags||[]).map(a=>({id:a.id,nombre:a.nombre,n:norm(a.nombre),nc:norm(a.nombre_completo||'')}));
+  AGENTES_MAP={};AGENTES_LISTA.forEach(a=>{AGENTES_MAP[a.n]=a.id;if(a.nc)AGENTES_MAP[a.nc]=a.id;});
   CAMP_MAP={};CAMPANAS.forEach(c=>CAMP_MAP[norm(c.nombre)]=c.id);
   const {data:mr}=await db.from('motivos_rechazo').select('id,nombre').order('orden');
   MOTIVOS_MAP={};(mr||[]).forEach(m=>MOTIVOS_MAP[norm(m.nombre)]=m.id);
@@ -985,7 +997,7 @@ async function cargarSelectsAsignar(){
 function leerExcel(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];res(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));}catch(err){rej(err);}};r.onerror=rej;r.readAsArrayBuffer(file);});}
 function mapearColumnas(rows){
   let hi=-1;
-  for(let i=0;i<Math.min(rows.length,10);i++){const j=rows[i].map(x=>norm(x)).join('|');if(j.includes('telefono')&&(j.includes('campa')||j.includes('agente'))){hi=i;break;}}
+  for(let i=0;i<Math.min(rows.length,10);i++){const H=rows[i].map(x=>norm(x));const it=H.findIndex(h=>h.includes('telefono')),ic=H.findIndex(h=>h.includes('campa')),ia=H.findIndex(h=>h.includes('agente'));if(it>=0&&(ic>=0||ia>=0)&&it!==ic&&it!==ia){hi=i;break;}}
   if(hi<0)return null;
   const H=rows[hi].map(x=>norm(x));
   const idx={campana:H.findIndex(h=>h.includes('campa')),agente:H.findIndex(h=>h.includes('agente')),tel:H.findIndex(h=>h.includes('tel')),adeudo:H.findIndex(h=>h.includes('adeudo')),monto:H.findIndex(h=>h.includes('monto')),renovar:H.findIndex(h=>h.includes('renovar')),fecha:H.findIndex(h=>h.includes('fecha'))};
@@ -1045,7 +1057,7 @@ function parseNums(txt){
 }
 function mapearRechazos(rows){
   let hi=-1;
-  for(let i=0;i<Math.min(rows.length,10);i++){const j=rows[i].map(x=>norm(x)).join('|');if((j.includes('numero')||j.includes('tel'))&&j.includes('motivo')){hi=i;break;}}
+  for(let i=0;i<Math.min(rows.length,10);i++){const H=rows[i].map(x=>norm(x));const it=H.findIndex(h=>h.includes('numero')||h.includes('tel')),im=H.findIndex(h=>h.includes('motivo'));if(it>=0&&im>=0&&it!==im){hi=i;break;}}
   if(hi<0)return null;
   const H=rows[hi].map(x=>norm(x));
   const idx={campana:H.findIndex(h=>h.includes('campa')),fecha:H.findIndex(h=>h.includes('fecha')),tel:H.findIndex(h=>h.includes('numero')||h.includes('tel')),motivo:H.findIndex(h=>h.includes('motivo'))};
