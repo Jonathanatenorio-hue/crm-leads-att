@@ -733,6 +733,38 @@ async function cargarLeads(){
   refrescar();
 }
 
+// ===== ARCHIVADO MASIVO (director) =====
+function leadsParaArchivo(){
+  const tipo=$('arcTipo')?.value||'caidos', dias=parseInt($('arcDias')?.value)||0;
+  const corte=Date.now()-dias*864e5;
+  return LEADS.filter(l=>{
+    if(l.archivado)return false;
+    const esCaido=l.etapa==='Lead caído';
+    const esNV=l.viabilidad==='NO VIABLE'&&!l.etapa;
+    const match=tipo==='caidos'?esCaido:(tipo==='noviables'?esNV:(esCaido||esNV));
+    if(!match)return false;
+    return new Date(l.ultimo_movimiento||l.creado_en||0).getTime()<=corte;
+  });
+}
+function previewArchivo(){
+  const n=leadsParaArchivo().length;
+  const i=$('arcInfo');if(i)i.textContent=n?`${n} leads cumplen el criterio y se archivarían.`:'Ningún lead cumple el criterio.';
+}
+async function archivarMasivo(){
+  const sel=leadsParaArchivo();
+  if(!sel.length){previewArchivo();return;}
+  if(!confirm(`Se archivarán ${sel.length} leads.\n\nSeguirán guardados en la base (visor 🗄 de Operación) pero saldrán del dashboard, las tablas y los informes.\n¿Continuar?`))return;
+  const ids=sel.map(l=>l.id);const btn=$('btnArchivarMasa');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  let err=null;
+  for(let i=0;i<ids.length&&!err;i+=400){
+    const {error}=await db.from('leads').update({archivado:true}).in('id',ids.slice(i,i+400));
+    err=error;
+  }
+  btn.disabled=false;btn.textContent='Archivar…';
+  if(err){toast('Error al archivar: '+err.message,false);return;}
+  toast(`${sel.length} leads archivados 🗄`);
+  await cargarLeads();renderDashboard();
+}
 // ===== ALERTAS EN TIEMPO REAL: LEAD CAÍDO (supervisor/director) =====
 let RT_VISTOS=new Set();
 function iniciarAlertasCaidos(){
@@ -1584,7 +1616,15 @@ async function renderDashboard(){
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
         <button class="btn btn-primary" id="btnReciclar">Extraer y marcar reciclado</button>
-      </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`:''}`;
+      </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>
+    <div class="dash-card" style="margin-top:16px"><h3>🗄 Archivado masivo</h3><div class="dc-sub">Saca del panorama los leads que ya cumplieron su ciclo — siguen en la base y puedes verlos con el botón 🗄 de Operación</div>
+      <div class="recycle-box">
+        <select id="arcTipo"><option value="caidos">Leads caídos</option><option value="noviables">No viables (sin etapa)</option><option value="ambos">Caídos + No viables</option></select>
+        <select id="arcDias"><option value="0">Cualquier antigüedad</option><option value="7">+7 días sin movimiento</option><option value="15">+15 días sin movimiento</option><option value="30" selected>+30 días sin movimiento</option></select>
+        <button class="btn btn-primary" id="btnArchivarMasa">Archivar…</button>
+      </div>
+      <div class="dash-empty" id="arcInfo" style="margin-top:10px"></div>
+    </div>`:''}`;
 
   wireFiltrosDash();
   wireAsistente();
@@ -1611,6 +1651,7 @@ async function renderDashboard(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
+  const _ba=$('btnArchivarMasa');if(_ba){_ba.onclick=archivarMasivo;$('arcTipo').onchange=previewArchivo;$('arcDias').onchange=previewArchivo;previewArchivo();}
   $('btnInforme').onclick=generarInforme;
   $('tbltabs').querySelectorAll('button').forEach(b=>b.onclick=()=>renderTablas(b.dataset.t));
   $('btnExportTabla').onclick=exportTabla;
