@@ -300,6 +300,7 @@ tbody tr:hover{background:#F7F8FF}
       <div class="kpi"><div class="kl">Ventas</div><div class="kv g" id="kVentas">0</div><div class="kf">cerradas</div></div>
       <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf">sobre viables</div></div>
     </div>
+    <div id="pendPanel"></div>
     <div class="toolbar">
       <div class="search"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" type="text" placeholder="Buscar por teléfono o nombre…"></div>
       <div class="selectwrap"><select id="filterEstado">
@@ -667,6 +668,8 @@ async function entrarApp(session){
   }
   hide($('boot'));hide($('login'));show($('app'));
   await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads()]);
+  if(AGENTE.rol==='agente')cargarSupMap().then(()=>renderPendientes()).catch(()=>{});
+  iniciarAlertasCaidos();
   if(['director','depurador'].includes(AGENTE.rol)) await cargarSelectsAsignar();
   buildEtapas();
 }
@@ -712,18 +715,106 @@ async function cargarLeads(){
     while(true){
       const {data:ns,error:ne}=await db.from('lead_notas').select('lead_id,nota,creado_en').order('creado_en',{ascending:false}).range(d0,d0+PAGE-1);
       if(ne)break;
-      (ns||[]).forEach(n=>{if(nm[n.lead_id]===undefined)nm[n.lead_id]=n.nota;});
+      (ns||[]).forEach(n=>{if(nm[n.lead_id]===undefined)nm[n.lead_id]={nota:n.nota,fecha:n.creado_en};});
       if(!ns||ns.length<PAGE)break;d0+=PAGE;
     }
-    LEADS.forEach(l=>l._nota=nm[l.id]||null);
+    LEADS.forEach(l=>{const x=nm[l.id];l._nota=x?x.nota:null;l._notaFecha=x?x.fecha:null;});
   }catch(e){}
   if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
     fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;}
   refrescar();
 }
 
+// ===== ALERTAS EN TIEMPO REAL: LEAD CAÍDO (supervisor/director) =====
+let RT_VISTOS=new Set();
+function iniciarAlertasCaidos(){
+  if(!['supervisor','director'].includes(AGENTE.rol))return;
+  cargarSupMap().catch(()=>{});
+  try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();}catch(e){}
+  try{
+    db.channel('rt-caidos')
+      .on('postgres_changes',{event:'*',schema:'public',table:'leads'},(payload)=>{
+        const l=payload.new;
+        if(!l||l.etapa!=='Lead caído'||RT_VISTOS.has(l.id))return;
+        RT_VISTOS.add(l.id);
+        const ag=AGPORID?.[l.agente_id]||null;
+        // supervisor: solo su equipo; director: todos
+        if(AGENTE.rol==='supervisor'&&ag&&ag.supervisor&&ag.supervisor!==AGENTE.nombre)return;
+        const motivo=(typeof MOTIVOS!=='undefined'&&MOTIVOS.find(m=>m.id===l.motivo_caida_id)?.nombre)||'';
+        mostrarAlertaCaido(l,ag?ag.nombre:'',motivo);
+      }).subscribe();
+  }catch(e){}
+}
+function mostrarAlertaCaido(l,agNombre,motivo){
+  let cont=$('rtAlerts');
+  if(!cont){cont=document.createElement('div');cont.id='rtAlerts';
+    cont.style.cssText='position:fixed;bottom:20px;right:20px;z-index:400;display:flex;flex-direction:column;gap:10px;max-width:340px';
+    document.body.appendChild(cont);}
+  const el=document.createElement('div');
+  el.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-left:5px solid #DC2626;border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);font-size:13px;animation:fadeIn .2s';
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;gap:8px">
+    <b>📉 Lead caído${agNombre?' — '+agNombre:''}</b>
+    <button style="border:none;background:none;cursor:pointer;font-size:14px" onclick="this.closest('div').parentNode.remove()">✕</button></div>
+    <div style="margin-top:4px">${l.telefono||''}${l.nombre?' · '+l.nombre:''}</div>
+    ${motivo?`<div class="muted-cell" style="font-size:12px;margin-top:2px">Motivo: ${motivo}</div>`:''}
+    <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:4px 10px" data-id="${l.id}">Ver lead y dar retro →</button>`;
+  el.querySelector('[data-id]').onclick=async()=>{
+    await cargarLeads();
+    const full=LEADS.find(x=>x.id===l.id);
+    if(full){setSeccion('operacion');abrirDrawer(full);}
+    el.remove();
+  };
+  cont.prepend(el);
+  try{
+    if('Notification' in window&&Notification.permission==='granted')
+      new Notification('📉 Lead caído'+(agNombre?' — '+agNombre:''),{body:(l.telefono||'')+(motivo?' · '+motivo:'')});
+  }catch(e){}
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();o.connect(g);g.connect(ac.destination);
+    o.frequency.value=660;g.gain.value=0.06;o.start();o.stop(ac.currentTime+0.18);
+  }catch(e){}
+}
+// ===== PENDIENTES DEL DÍA (vista del agente) =====
+function renderPendientes(){
+  const P=$('pendPanel');if(!P)return;
+  if(!AGENTE||AGENTE.rol!=='agente'){P.innerHTML='';return;}
+  const ahora=Date.now(),hoyDia=new Date().getDate();
+  const vivos=LEADS.filter(l=>l.viabilidad==='VIABLE'&&!['Venta exitosa','Lead caído'].includes(l.etapa||''));
+  const acel=vivos.filter(l=>l.etapa==='Aceleración pendiente');
+  const acelListas=acel.filter(l=>!l.acel_dia_corte||hoyDia>=l.acel_dia_corte);
+  const acelEspera=acel.filter(l=>l.acel_dia_corte&&hoyDia<l.acel_dia_corte);
+  const refMov=l=>Math.max(new Date(l.ultimo_movimiento||l.creado_en||0).getTime(),l._notaFecha?new Date(l._notaFecha).getTime():0);
+  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'&&(ahora-refMov(l))>864e5)
+    .sort((a,b)=>refMov(a)-refMov(b));
+  const sinContacto=vivos.filter(l=>!l.etapa);
+  const caidos14=LEADS.filter(l=>l.etapa==='Lead caído'&&(ahora-new Date(l.ultimo_movimiento||l.creado_en).getTime())<14*864e5);
+  let coaching='';
+  if(caidos14.length>=3){
+    const mc={};caidos14.forEach(l=>{const m=(typeof MOTIVOS!=='undefined'&&MOTIVOS.find(x=>x.id===l.motivo_caida_id)?.nombre)||'Sin motivo';mc[m]=(mc[m]||0)+1;});
+    const top=Object.entries(mc).sort((a,b)=>b[1]-a[1])[0];
+    const sup=(typeof SUPMAP!=='undefined'&&SUPMAP&&SUPMAP[AGENTE.nombre])||'tu supervisor';
+    coaching=`<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 12px;font-size:12.5px;margin-top:8px">
+      📉 Llevas <b>${caidos14.length} leads caídos</b> en 2 semanas — motivo principal: <b>${top[0]}</b> (${top[1]}).
+      Acércate con <b>${sup}</b> para trabajar juntos esa objeción. 💪</div>`;
+  }
+  if(!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
+  const chip=l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`;
+  const lista=(arr,max=8)=>arr.slice(0,max).map(chip).join(' ')+(arr.length>max?` <span class="muted-cell" style="font-size:11px">+${arr.length-max} más</span>`:'');
+  const horas=l=>Math.round((ahora-refMov(l))/36e5);
+  P.innerHTML=`<div class="dash-card" style="margin-bottom:16px">
+    <h3>🔔 Tus pendientes de hoy</h3>
+    ${acelListas.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B45309">🚀 Aceleraciones LISTAS para subir hoy (${acelListas.length}) — ¡véndelas ya!</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(acelListas,12)}</div></div>`:''}
+    ${acelEspera.length?`<div style="margin-top:10px"><div style="font-weight:600;font-size:12.5px" class="muted-cell">⏳ Aceleraciones en espera de corte (${acelEspera.length}): ${acelEspera.slice(0,6).map(l=>l.telefono+' (día '+l.acel_dia_corte+')').join(' · ')}${acelEspera.length>6?' · +'+(acelEspera.length-6):''}</div></div>`:''}
+    ${sinMov.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B91C1C">⏰ Más de 24 hrs sin movimiento ni nota (${sinMov.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${sinMov.slice(0,8).map(l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid #FECACA;background:#FEF2F2;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono} · ${horas(l)}h</button>`).join(' ')}${sinMov.length>8?` <span class="muted-cell" style="font-size:11px">+${sinMov.length-8} más</span>`:''}</div></div>`:''}
+    ${sinContacto.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#4338CA">🆕 Sin primer contacto (${sinContacto.length}) — tipifícalos hoy</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(sinContacto)}</div></div>`:''}
+    ${coaching}
+  </div>`;
+  P.querySelectorAll('.pendChip').forEach(b=>b.onclick=()=>{const l=LEADS.find(x=>String(x.id)===b.dataset.id);if(l)abrirDrawer(l);});
+}
 // ===== RENDER TABLA =====
 function render(){
+  renderPendientes();
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
   const etF=$('filterEtapa')?$('filterEtapa').value:'';
   let rows=LEADS.filter(l=>{
@@ -1275,20 +1366,34 @@ function resumenCRM(){
 function informeWhats(){
   const hoyTxt=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
   const A={};
-  LEADS.forEach(l=>{const ag=l.agentes?.nombre||'—';const e=l.etapa||'Sin tipificar';
-    const o=A[ag]=A[ag]||{et:{},total:0,ventas:0};o.et[e]=(o.et[e]||0)+1;o.total++;if(l.etapa==='Venta exitosa')o.ventas++;});
-  const ORDEN=['Inicio de negociación','Adeudo mensualidad','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído','Sin tipificar'];
+  LEADS.forEach(l=>{
+    const ag=l.agentes?.nombre||'—';
+    const o=A[ag]=A[ag]||{cartera:0,viables:0,ventas:0,activos:0,et:{}};
+    o.cartera++;
+    if(l.viabilidad==='VIABLE')o.viables++;
+    if(l.etapa==='Venta exitosa'){o.ventas++;return;}
+    if(l.etapa==='Lead caído')return;
+    if(l.viabilidad!=='VIABLE')return;           // solo cartera viva: viables sin cerrar ni caer
+    o.activos++;
+    const e=l.etapa||'Sin tipificar';o.et[e]=(o.et[e]||0)+1;
+  });
+  const ORDEN=['Falta pago inicial','Falta contrato firmado','Falta INE o biométrico','Aceleración pendiente','Línea adicional','Cotización enviada','Adeudo mensualidad','Inicio de negociación','Sin tipificar'];
   let t='📊 *ARRANQUE DEL DÍA — '+hoyTxt.toUpperCase()+'*\n';
-  t+='_Cartera por agente y etapa_\n\n';
-  Object.entries(A).sort((a,b)=>b[1].ventas-a[1].ventas||b[1].total-a[1].total).forEach(([ag,o])=>{
-    t+='👤 *'+ag+'* ('+o.total+' leads'+(o.ventas?' · '+o.ventas+' ✅':'')+')\n';
-    ORDEN.forEach(e=>{if(o.et[e])t+='   · '+e+': '+o.et[e]+'\n';});
-    t+='\n';});
-  const tot=LEADS.length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
+  t+='_Cartera VIVA por agente (viables por trabajar)_\n\n';
+  Object.entries(A).filter(([,o])=>o.activos>0||o.ventas>0)
+    .sort((a,b)=>b[1].activos-a[1].activos)
+    .forEach(([ag,o])=>{
+      t+='👤 *'+ag+'* — 🎯 *'+o.activos+' para vender* · '+o.ventas+' ✅\n';
+      ORDEN.forEach(e=>{if(o.et[e])t+='   · '+e+': '+o.et[e]+'\n';});
+      t+='\n';});
+  const activosTot=Object.values(A).reduce((s,o)=>s+o.activos,0);
+  const ventTot=Object.values(A).reduce((s,o)=>s+o.ventas,0);
   const cerca=LEADS.filter(l=>['Falta pago inicial','Falta contrato firmado','Falta INE o biométrico','Aceleración pendiente'].includes(l.etapa)).length;
+  const sinTip=LEADS.filter(l=>l.viabilidad==='VIABLE'&&!l.etapa).length;
   t+='━━━━━━━━━━━━━━\n';
-  t+='🎯 *GLOBAL: '+tot+' leads · '+vent+' ventas*\n';
-  t+='🔥 *'+cerca+' leads a un paso de cerrar* (INE/contrato/pago/aceleración)\n';
+  t+='🎯 *'+activosTot+' leads vivos para vender hoy* · '+ventTot+' ventas acumuladas\n';
+  t+='🔥 *'+cerca+' a un paso de cerrar* (pago/contrato/INE/aceleración)\n';
+  if(sinTip)t+='⚠️ '+sinTip+' viables sin tipificar — ¡primer contacto pendiente!\n';
   t+='¡Vamos por un día histórico! 💪';
   navigator.clipboard.writeText(t).then(()=>toast('Informe copiado — pégalo en WhatsApp'),()=>{});
   CHAT.push({rol:'crm',txt:t.replace(/\*/g,'')});
@@ -1330,16 +1435,18 @@ function wireAsistente(){
   document.querySelectorAll('.aiChip').forEach(b=>b.onclick=()=>preguntarCRM(b.textContent));
 }
 let DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};
-let SUPMAP=null;   // agente → supervisor
+let SUPMAP=null, AGPORID=null;   // agente → supervisor / id → {nombre, supervisor}
 async function cargarSupMap(){
   if(SUPMAP)return;
   SUPMAP={};
   try{
     const [{data:ags},{data:sups}]=await Promise.all([
-      db.from('agentes').select('nombre,supervisor_id'),
+      db.from('agentes').select('id,nombre,supervisor_id'),
       db.from('supervisores').select('id,nombre')]);
     const S={};(sups||[]).forEach(s=>S[s.id]=s.nombre);
-    (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];});
+    AGPORID={};
+    (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];
+      AGPORID[a.id]={nombre:a.nombre,supervisor:S[a.supervisor_id]||null};});
   }catch(e){}
 }
 function rangoFechas(){
