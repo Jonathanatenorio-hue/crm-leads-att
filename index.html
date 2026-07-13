@@ -308,7 +308,7 @@ tbody tr:hover{background:#F7F8FF}
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
-      <div class="selectwrap"><select id="filterEtapa"><option value="">Todas las etapas</option><option value="__sin__">Sin tipificar</option></select></div>
+      <div class="selectwrap"><select id="filterEtapa"><option value="">Todas las etapas</option><option value="__ventahoy__">💰 Vendidos HOY</option><option value="__sin__">Sin tipificar</option></select></div>
       <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
         <button data-v="tabla" class="on">▤ Tabla</button>
@@ -866,7 +866,8 @@ function render(){
     if(est==='Lead caído'&&l.etapa!=='Lead caído')return false;
     if(agF&&String(l.agente_id)!==agF)return false;
     if(etF==='__sin__'&&l.etapa)return false;
-    if(etF&&etF!=='__sin__'&&l.etapa!==etF)return false;
+    if(etF==='__ventahoy__'&&!(l.etapa==='Venta exitosa'&&diaLocal(l.fecha_venta||l.ultimo_movimiento)===isoLocal(new Date())))return false;
+    if(etF&&!['__sin__','__ventahoy__'].includes(etF)&&l.etapa!==etF)return false;
     return true;
   });
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
@@ -884,7 +885,7 @@ function render(){
     const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
-      <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}</td>`;
+      <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
     tb.appendChild(tr);
   });
 }
@@ -1387,7 +1388,8 @@ function resumenCRM(){
     const ag=l.agentes?.nombre||'—',d=dia(l.creado_en),cp=l.campanas?.nombre||'—';
     const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
     A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
-    const D=porDia[d]=porDia[d]||{leads:0,viables:0,ventas:0};D.leads++;if(l.viabilidad==='VIABLE')D.viables++;if(l.etapa==='Venta exitosa')D.ventas++;
+    const D=porDia[d]=porDia[d]||{leads:0,viables:0,ventas:0};D.leads++;if(l.viabilidad==='VIABLE')D.viables++;
+    if(l.etapa==='Venta exitosa'){const dv=dia(l.fecha_venta||l.creado_en);(porDia[dv]=porDia[dv]||{leads:0,viables:0,ventas:0}).ventas++;}
     const C=porCamp[cp]=porCamp[cp]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0};C.leads++;if(l.viabilidad==='VIABLE')C.viables++;if(l.etapa==='Venta exitosa')C.ventas++;
     (agDia[d]=agDia[d]||{})[ag]=(agDia[d]?.[ag]||0)+1;});
   CAMPANAS.forEach(c=>{(porCamp[c.nombre]=porCamp[c.nombre]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0}).enviados=c.mensajes_enviados||0;});
