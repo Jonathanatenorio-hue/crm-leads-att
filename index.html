@@ -911,7 +911,7 @@ function etapaBadge(e){if(!e)return '<span class="muted-cell">—</span>';if(e==
 // ===== ETAPAS UI =====
 function buildEtapas(){
   const fe=$('filterEtapa');
-  if(fe&&fe.options.length<=2)ETAPAS.forEach(e=>{const o=document.createElement('option');o.value=e.v;o.textContent=e.v;fe.appendChild(o);});
+  if(fe&&fe.options.length<=3)ETAPAS.forEach(e=>{const o=document.createElement('option');o.value=e.v;o.textContent=e.v;fe.appendChild(o);});
   const g=$('etapaGrid');g.innerHTML='';
   ETAPAS.forEach(e=>{
     const b=document.createElement('button');b.className='etapa-opt';b.dataset.v=e.v;
