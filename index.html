@@ -279,6 +279,13 @@ tbody tr:hover{background:#F7F8FF}
   <div class="topbar">
     <div class="brand"><span class="dot"></span><span class="bn">ExpertCell</span></div>
     <div class="spacer"></div>
+    <div id="bellWrap" class="hidden" style="position:relative">
+      <button id="btnBell" class="btn btn-ghost" style="font-size:17px;padding:6px 10px;position:relative">🔔<span id="bellBadge" class="hidden" style="position:absolute;top:-2px;right:-2px;background:#DC2626;color:#fff;font-size:10px;font-weight:800;border-radius:999px;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0 4px">0</span></button>
+      <div id="bellPanel" class="hidden" style="position:absolute;right:0;top:44px;width:330px;max-height:420px;overflow-y:auto;background:var(--surface,#fff);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.16);z-index:120;padding:10px">
+        <div style="font-weight:800;font-size:13px;padding:2px 6px 8px">📉 Leads caídos — hoy</div>
+        <div id="bellList"></div>
+      </div>
+    </div>
     <div class="userchip" id="userchip">
       <div class="ui"><div class="un" id="uName">—</div><div class="ur" id="uRole">—</div></div>
       <div class="av" id="uAvatar">—</div>
@@ -539,6 +546,10 @@ tbody tr:hover{background:#F7F8FF}
       </div>
     </div>
     <div class="dmsg" id="drMsg"></div>
+    <div class="row2" style="margin-top:10px">
+      <div class="field"><label>📅 Próximo contacto (opcional)</label><input type="date" id="pcFecha"></div>
+      <div class="field"><label>¿Qué harás ese día?</label><input type="text" id="pcNota" placeholder="Ej. Recordarle su cita del INE"></div>
+    </div>
     <div class="field" id="notaIniW" style="margin-top:10px"><label>Nota inicial (opcional)</label><textarea id="notaIni" rows="2" placeholder="Comentario del primer contacto — se guarda junto con el lead"></textarea></div>
     <div class="cond hidden" id="f-derivado" style="border:1.5px solid var(--brand,#4F46E5);border-radius:12px;padding:14px;margin-top:10px">
       <div style="font-weight:700;margin-bottom:4px">🔗 ¿Es una línea adicional de un cliente tuyo?</div>
@@ -770,6 +781,9 @@ async function archivarMasivo(){
 let RT_VISTOS=new Set();
 function iniciarAlertasCaidos(){
   if(!['supervisor','director'].includes(AGENTE.rol))return;
+  $('bellWrap').classList.remove('hidden');actualizarCampana(false);
+  $('btnBell').onclick=abrirCampana;
+  document.addEventListener('click',e=>{if(!$('bellWrap').contains(e.target))$('bellPanel').classList.add('hidden');});
   cargarSupMap().catch(()=>{});
   try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();}catch(e){}
   try{
@@ -786,26 +800,19 @@ function iniciarAlertasCaidos(){
       }).subscribe();
   }catch(e){}
 }
+let RT_LOG=[];
 function mostrarAlertaCaido(l,agNombre,motivo){
-  let cont=$('rtAlerts');
-  if(!cont){cont=document.createElement('div');cont.id='rtAlerts';
-    cont.style.cssText='position:fixed;bottom:20px;right:20px;z-index:400;display:flex;flex-direction:column;gap:10px;max-width:340px';
-    document.body.appendChild(cont);}
-  const el=document.createElement('div');
-  el.style.cssText='background:#FEF2F2;border:1.5px solid #FECACA;border-left:5px solid #DC2626;border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);font-size:13px;animation:fadeIn .2s';
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;gap:8px">
-    <b>📉 Lead caído${agNombre?' — '+agNombre:''}</b>
-    <button style="border:none;background:none;cursor:pointer;font-size:14px" onclick="this.closest('div').parentNode.remove()">✕</button></div>
-    <div style="margin-top:4px">${l.telefono||''}${l.nombre?' · '+l.nombre:''}</div>
-    ${motivo?`<div class="muted-cell" style="font-size:12px;margin-top:2px">Motivo: ${motivo}</div>`:''}
-    <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:4px 10px" data-id="${l.id}">Ver lead y dar retro →</button>`;
-  el.querySelector('[data-id]').onclick=async()=>{
-    await cargarLeads();
-    const full=LEADS.find(x=>x.id===l.id);
-    if(full){setSeccion('operacion');abrirDrawer(full);}
-    el.remove();
-  };
-  cont.prepend(el);
+  RT_LOG.unshift({l,agNombre,motivo,hora:new Date()});
+  if(RT_LOG.length>30)RT_LOG.pop();
+  actualizarCampana(true);
+  // aviso fugaz (se quita solo en 6s, uno a la vez)
+  let f=$('rtFlash');if(f)f.remove();
+  f=document.createElement('div');f.id='rtFlash';
+  f.style.cssText='position:fixed;bottom:20px;right:20px;z-index:400;background:#FEF2F2;border:1.5px solid #FECACA;border-left:5px solid #DC2626;border-radius:12px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);font-size:12.5px;max-width:300px;cursor:pointer';
+  f.innerHTML=`<b>📉 Lead caído${agNombre?' — '+agNombre:''}</b><div style="margin-top:2px">${l.telefono||''}${motivo?' · '+motivo:''}</div><div class="muted-cell" style="font-size:11px;margin-top:2px">Guardado en la campana 🔔</div>`;
+  f.onclick=()=>{f.remove();abrirCampana();};
+  document.body.appendChild(f);
+  setTimeout(()=>{try{f.remove();}catch(e){}},6000);
   try{
     if('Notification' in window&&Notification.permission==='granted')
       new Notification('📉 Lead caído'+(agNombre?' — '+agNombre:''),{body:(l.telefono||'')+(motivo?' · '+motivo:'')});
@@ -816,7 +823,30 @@ function mostrarAlertaCaido(l,agNombre,motivo){
     o.frequency.value=660;g.gain.value=0.06;o.start();o.stop(ac.currentTime+0.18);
   }catch(e){}
 }
-// ===== PENDIENTES DEL DÍA (vista del agente) =====
+function actualizarCampana(nueva){
+  $('bellWrap').classList.remove('hidden');
+  const b=$('bellBadge');
+  if(nueva){b.textContent=String(Math.min(99,parseInt(b.textContent||'0')+1));b.classList.remove('hidden');}
+  const lst=$('bellList');
+  lst.innerHTML=RT_LOG.length?RT_LOG.map((r,i)=>`<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:12.5px">
+    <b>${r.agNombre||'Agente'}</b> · ${r.hora.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}
+    <div>${r.l.telefono||''}${r.l.nombre?' · '+r.l.nombre:''}</div>
+    ${r.motivo?`<div class="muted-cell" style="font-size:11.5px">Motivo: ${r.motivo}</div>`:''}
+    <button class="btn btn-ghost bellVer" data-i="${i}" style="margin-top:4px;font-size:11.5px;padding:2px 8px">Ver lead y dar retro →</button>
+  </div>`).join(''):'<div class="dash-empty" style="font-size:12px">Sin caídos nuevos en esta sesión.</div>';
+  lst.querySelectorAll('.bellVer').forEach(bt=>bt.onclick=async()=>{
+    const r=RT_LOG[parseInt(bt.dataset.i)];if(!r)return;
+    $('bellPanel').classList.add('hidden');
+    await cargarLeads();
+    const full=LEADS.find(x=>x.id===r.l.id);
+    if(full){setSeccion('operacion');abrirDrawer(full);}
+  });
+}
+function abrirCampana(){
+  const p=$('bellPanel');p.classList.toggle('hidden');
+  if(!p.classList.contains('hidden')){const b=$('bellBadge');b.textContent='0';b.classList.add('hidden');actualizarCampana(false);}
+}
+// ===== PENDIENTES DEL DÍA (vista del agente) =====// ===== PENDIENTES DEL DÍA (vista del agente) =====
 function renderPendientes(){
   const P=$('pendPanel');if(!P)return;
   if(!AGENTE||AGENTE.rol!=='agente'){P.innerHTML='';return;}
@@ -826,7 +856,11 @@ function renderPendientes(){
   const acelListas=acel.filter(l=>!l.acel_dia_corte||hoyDia>=l.acel_dia_corte);
   const acelEspera=acel.filter(l=>l.acel_dia_corte&&hoyDia<l.acel_dia_corte);
   const refMov=l=>Math.max(new Date(l.ultimo_movimiento||l.creado_en||0).getTime(),l._notaFecha?new Date(l._notaFecha).getTime():0);
-  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'&&(ahora-refMov(l))>864e5)
+  const hoyIso=isoLocal(new Date());
+  const prog=vivos.filter(l=>l.proximo_contacto&&l.proximo_contacto<=hoyIso)
+    .sort((a,b)=>(a.proximo_contacto<b.proximo_contacto?-1:1));
+  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'&&(ahora-refMov(l))>864e5
+      &&!(l.proximo_contacto&&l.proximo_contacto>hoyIso))
     .sort((a,b)=>refMov(a)-refMov(b));
   const sinContacto=vivos.filter(l=>!l.etapa);
   const caidos14=LEADS.filter(l=>l.etapa==='Lead caído'&&(ahora-new Date(l.ultimo_movimiento||l.creado_en).getTime())<14*864e5);
@@ -839,12 +873,13 @@ function renderPendientes(){
       📉 Llevas <b>${caidos14.length} leads caídos</b> en 2 semanas — motivo principal: <b>${top[0]}</b> (${top[1]}).
       Acércate con <b>${sup}</b> para trabajar juntos esa objeción. 💪</div>`;
   }
-  if(!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
+  if(!prog.length&&!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
   const chip=l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`;
   const lista=(arr,max=8)=>arr.slice(0,max).map(chip).join(' ')+(arr.length>max?` <span class="muted-cell" style="font-size:11px">+${arr.length-max} más</span>`:'');
   const horas=l=>Math.round((ahora-refMov(l))/36e5);
   P.innerHTML=`<div class="dash-card" style="margin-bottom:16px">
     <h3>🔔 Tus pendientes de hoy</h3>
+    ${prog.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#047857">📅 Contactos programados para hoy${prog.some(l=>l.proximo_contacto<hoyIso)?' (incluye vencidos)':''} (${prog.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${prog.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" title="${(l.proximo_contacto_nota||'').replace(/"/g,'&quot;')}" style="border:1px solid ${l.proximo_contacto<hoyIso?'#FECACA;background:#FEF2F2':'#A7F3D0;background:#ECFDF5'};border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.proximo_contacto<hoyIso?' · vencido '+fechaCorta(l.proximo_contacto):''}</button>`).join(' ')}${prog.length>10?` <span class="muted-cell" style="font-size:11px">+${prog.length-10} más</span>`:''}</div></div>`:''}
     ${acelListas.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B45309">🚀 Aceleraciones LISTAS para subir hoy (${acelListas.length}) — ¡véndelas ya!</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(acelListas,12)}</div></div>`:''}
     ${acelEspera.length?`<div style="margin-top:10px"><div style="font-weight:600;font-size:12.5px" class="muted-cell">⏳ Aceleraciones en espera de corte (${acelEspera.length}): ${acelEspera.slice(0,6).map(l=>l.telefono+' (día '+l.acel_dia_corte+')').join(' · ')}${acelEspera.length>6?' · +'+(acelEspera.length-6):''}</div></div>`:''}
     ${sinMov.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B91C1C">⏰ Más de 24 hrs sin movimiento ni nota (${sinMov.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${sinMov.slice(0,8).map(l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid #FECACA;background:#FEF2F2;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono} · ${horas(l)}h</button>`).join(' ')}${sinMov.length>8?` <span class="muted-cell" style="font-size:11px">+${sinMov.length-8} más</span>`:''}</div></div>`:''}
@@ -887,9 +922,12 @@ function render(){
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
     const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
-    const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===isoLocal(new Date()))||diaLocal(l.ultimo_movimiento)===isoLocal(new Date());
+    const _hoyIso=isoLocal(new Date());
+    const pcChip=l.proximo_contacto&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?
+      ' <span class="badge" style="font-size:10px;padding:2px 7px;'+(l.proximo_contacto<_hoyIso?'background:#FEE2E2;color:#991B1B':(l.proximo_contacto===_hoyIso?'background:#D1FAE5;color:#065F46':'background:#F3F4F6;color:#475569'))+'" title="'+String(l.proximo_contacto_nota||'Próximo contacto').replace(/"/g,'&quot;')+'">📅 '+(l.proximo_contacto===_hoyIso?'HOY':fechaCorta(l.proximo_contacto))+'</span>':'';
+    const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===_hoyIso)||diaLocal(l.ultimo_movimiento)===_hoyIso;
     const segChip=segHoy&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Con nota o movimiento de hoy">✓ hoy</span>':'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip;
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
@@ -1000,6 +1038,7 @@ function abrirDrawer(lead){
   ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic'].forEach(x=>hide($(x)));
   $('notaIniW').classList.toggle('hidden',!!lead);$('notaIni').value='';
   $('segLinEq').querySelectorAll('button').forEach(b=>b.className='');hide($('lEquipoW'));$('lPlan').value='';$('lEquipo').value='';
+  $('pcFecha').value='';$('pcNota').value='';
   hide($('aVentaFields'));hide($('aAppsField'));hide($('aIneFile'));hide($('aCalcBox'));hide($('aIneOk'));
   $('aUltimaCuota').value=lead?.acel_fecha_ultima_cuota||'';$('aDiaCorte').value=lead?.acel_dia_corte||'';
   $('aMonto').value=lead?.acel_monto||'';$('aPlan').value=lead?.acel_plan||'';$('aEquipo').value=lead?.acel_equipo||'';$('aApps').value=lead?.acel_apps||'';
@@ -1014,6 +1053,7 @@ function abrirDrawer(lead){
     if(lead.acel_tiene_ine){st.ine='Sí';segSet('segIne','Sí');show($('aIneFile'));show($('aVentaFields'));if(lead.acel_equipo)show($('aAppsField'));}
     if(lead.acel_ine_url){st.ineUrl=lead.acel_ine_url;show($('aIneOk'));}
     if(lead.falta_que){st.faltaQue=lead.falta_que;segSet('segFaltaQue',lead.falta_que);}
+    $('pcFecha').value=lead.proximo_contacto||'';$('pcNota').value=lead.proximo_contacto_nota||'';
     if(lead.etapa==='Línea adicional'){
       $('lPlan').value=lead.acel_plan||'';
       const eq=lead.acel_equipo==='Sin equipo'?'Sin equipo':(lead.acel_equipo?'Con equipo':null);
@@ -1072,6 +1112,8 @@ async function guardar(){
     if(st.etapa==='Lead caído'){if(!$('kMotivo').value)return fail('Selecciona el motivo de la caída.');o.motivo_caida_id=parseInt($('kMotivo').value);o.comentarios=$('kComent').value.trim()||null;}
   }
 
+  o.proximo_contacto=$('pcFecha').value||null;
+  o.proximo_contacto_nota=$('pcNota').value.trim()||null;
   if(st.padreId)o.lead_padre_id=st.padreId;
   const btn=$('drSave');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
   let error, etapaAnterior=null;
