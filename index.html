@@ -698,10 +698,18 @@ async function cargarMotivos(){
 async function cargarLeads(){
   // Paginado: Supabase regresa máximo 1000 filas por consulta
   const PAGE=1000;let todo=[],desde=0;
+  // supervisor: solo los leads de SU equipo
+  let EQUIPO_IDS=null;
+  if(AGENTE.rol==='supervisor'){
+    try{await cargarSupMap();}catch(e){}
+    EQUIPO_IDS=AGPORID?Object.entries(AGPORID).filter(([,v])=>v.supervisor===AGENTE.nombre).map(([id])=>parseInt(id)):[];
+    if(!EQUIPO_IDS.length)EQUIPO_IDS=[-1];   // sin equipo asignado → no ve leads
+  }
   while(true){
     let q=db.from('leads').select('*, campanas(nombre), agentes(nombre)').order('creado_en',{ascending:false}).range(desde,desde+PAGE-1);
     q=VER_ARCH?q.eq('archivado',true):q.or('archivado.is.null,archivado.eq.false');
     if(AGENTE.rol==='agente')q=q.eq('agente_id',AGENTE.id);
+    if(EQUIPO_IDS)q=q.in('agente_id',EQUIPO_IDS);
     const {data,error}=await q;
     if(error){toast('Error al cargar leads',false);return;}
     todo=todo.concat(data||[]);
