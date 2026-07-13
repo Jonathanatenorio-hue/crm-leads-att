@@ -1572,11 +1572,11 @@ async function renderDashboard(){
     </div>
     <div class="dash-card" style="margin-bottom:16px"><h3>⚠️ Leads sin movimiento (+24h)</h3><div class="dc-sub">Seguimiento pendiente · ${parados.length} en alerta</div>
       ${parados.length?parados.map(l=>{const h=Math.round((ahora-new Date(l.ultimo_movimiento).getTime())/36e5);return `<div class="alert-row"><div><span class="al-tel">${l.telefono}</span> <span class="al-nom">${l.nombre||''} · ${l.etapa}${ES_STAFF&&l.agentes?.nombre?' · '+l.agentes.nombre:''}</span></div><span class="al-h">${h}h sin mover</span></div>`;}).join(''):'<div class="dash-empty">Todo con seguimiento al día. 🎉</div>'}</div>
-    <div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
+    ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
         <button class="btn btn-primary" id="btnReciclar">Extraer y marcar reciclado</button>
-      </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`;
+      </div><div class="dash-empty" id="recInfo" style="margin-top:10px"></div></div>`:''}`;
 
   wireFiltrosDash();
   wireAsistente();
@@ -1602,7 +1602,7 @@ async function renderDashboard(){
     {label:'Ventas',data:ventasDia,borderColor:'#16A34A',backgroundColor:'rgba(22,163,74,.08)',fill:true,tension:.35,pointRadius:3,pointHoverRadius:6,borderWidth:2}]},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
-  $('btnReciclar').onclick=reciclar;
+  const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
   $('btnInforme').onclick=generarInforme;
   $('tbltabs').querySelectorAll('button').forEach(b=>b.onclick=()=>renderTablas(b.dataset.t));
   $('btnExportTabla').onclick=exportTabla;
