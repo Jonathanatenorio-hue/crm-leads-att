@@ -308,6 +308,7 @@ tbody tr:hover{background:#F7F8FF}
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
+      <div class="selectwrap"><select id="sortLeads"><option value="reciente">Más recientes primero</option><option value="pendiente">⏳ Seguimiento pendiente primero</option><option value="seguido">✓ Seguidos hoy primero</option></select></div>
       <div class="selectwrap"><select id="filterEtapa"><option value="">Todas las etapas</option><option value="__ventahoy__">💰 Vendidos HOY</option><option value="__sin__">Sin tipificar</option></select></div>
       <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
@@ -870,6 +871,10 @@ function render(){
     if(etF&&!['__sin__','__ventahoy__'].includes(etF)&&l.etapa!==etF)return false;
     return true;
   });
+  const ultAct=l=>Math.max(new Date(l.ultimo_movimiento||l.creado_en||0).getTime(),l._notaFecha?new Date(l._notaFecha).getTime():0);
+  const ordF=$('sortLeads')?$('sortLeads').value:'reciente';
+  if(ordF==='pendiente')rows.sort((a,b)=>ultAct(a)-ultAct(b));
+  else if(ordF==='seguido')rows.sort((a,b)=>ultAct(b)-ultAct(a));
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
   $('kLeads').textContent=LEADS.length;$('kViab').textContent=viab;
   $('kViabPct').textContent=LEADS.length?Math.round(viab/LEADS.length*100)+'% del total':'—';
@@ -882,7 +887,9 @@ function render(){
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
     const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip;
+    const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===isoLocal(new Date()))||diaLocal(l.ultimo_movimiento)===isoLocal(new Date());
+    const segChip=segHoy&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Con nota o movimiento de hoy">✓ hoy</span>':'';
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
@@ -3781,7 +3788,7 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',render);
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',render);$('sortLeads').addEventListener('change',render);
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
