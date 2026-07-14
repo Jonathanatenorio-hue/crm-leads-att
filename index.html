@@ -2055,9 +2055,11 @@ async function depurarLanzamiento(){
   const btn=$('btnDepurar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
   let res=[];
   try{
-    for(let i=0;i<nums.length;i+=2000){
-      const {data,error}=await db.rpc('depurar_base',{nums:nums.slice(i,i+2000)});
+    for(let i=0;i<nums.length;i+=900){   // máx 900: la API recorta respuestas a 1000 filas
+      const lote=nums.slice(i,i+900);
+      const {data,error}=await db.rpc('depurar_base',{nums:lote});
       if(error)throw error;
+      if((data||[]).length!==lote.length)throw new Error(`Respuesta incompleta del candado (${(data||[]).length}/${lote.length}). Reintenta la depuración.`);
       res=res.concat(data||[]);
     }
   }catch(e){btn.disabled=false;btn.textContent='Depurar base';return toast('Error al depurar: '+e.message,false);}
@@ -2098,8 +2100,8 @@ async function registrarLanzamiento(){
   const btn=$('btnRegistrarLanz');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
   let agregados=0,existian=0;
   try{
-    for(let i=0;i<lanzLimpios.length;i+=2000){
-      const {data,error}=await db.rpc('registrar_lanzamiento',{p_campana:nombre,p_fecha:fecha||new Date().toISOString().slice(0,10),nums:lanzLimpios.slice(i,i+2000)});
+    for(let i=0;i<lanzLimpios.length;i+=900){
+      const {data,error}=await db.rpc('registrar_lanzamiento',{p_campana:nombre,p_fecha:fecha||new Date().toISOString().slice(0,10),nums:lanzLimpios.slice(i,i+900)});
       if(error)throw error;
       if(data&&data[0]){agregados+=data[0].agregados||0;existian+=data[0].ya_existian||0;}
     }
