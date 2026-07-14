@@ -510,6 +510,7 @@ tbody tr:hover{background:#F7F8FF}
           <span class="fileok hidden" id="aIneOk">✓ INE cargado</span>
         </div>
         <div class="hidden" id="aVentaFields" style="margin-top:6px">
+          <div class="hint" style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:8px 12px;margin-bottom:8px">💡 <b>No es obligatorio, pero pídelo YA:</b> con plan + equipo definidos, tu aceleración queda <b>casi vendida</b> — el día del corte solo subes el trámite. Sin definir, es una venta que otro puede ganarte.</div>
           <div class="row2">
             <div class="field"><label>Plan que le venderá</label><input id="aPlan" type="text" placeholder="Ej. AT&T Plata"></div>
             <div class="field"><label>Equipo</label><input id="aEquipo" type="text" placeholder="Ej. iPhone / gama media"></div>
@@ -1098,12 +1099,10 @@ async function guardar(){
       if(!$('aUltimaCuota').value||!$('aDiaCorte').value)return fail('Aceleración: pon fecha de última cuota y día de corte.');
       o.acel_fecha_ultima_cuota=$('aUltimaCuota').value;o.acel_dia_corte=parseInt($('aDiaCorte').value);
       o.acel_monto=parseFloat($('aMonto').value)||null;o.acel_tiene_ine=(st.ine==='Sí');o.acel_ine_url=st.ineUrl||null;
-      if(st.ine==='Sí'){
-        if(!$('aPlan').value.trim()||!$('aEquipo').value.trim())return fail('Con INE, captura el plan y el equipo.');
-        o.acel_plan=$('aPlan').value.trim();o.acel_equipo=$('aEquipo').value.trim();
-        if(!$('aApps').value.trim())return fail('Captura las apps ilimitadas que eligió.');
-        o.acel_apps=$('aApps').value.trim();
-      }
+      // Plan/equipo/apps ya NO son obligatorios — pero sí muy recomendados (venta casi hecha)
+      o.acel_plan=$('aPlan').value.trim()||null;
+      o.acel_equipo=$('aEquipo').value.trim()||null;
+      o.acel_apps=$('aApps').value.trim()||null;
     }
     if(st.etapa==='Falta INE o biométrico'){if(!st.faltaQue)return fail('Indica si falta INE o biométrico.');o.falta_que=st.faltaQue;}
     if(st.etapa==='Falta contrato firmado'){if(!$('cFechaFirma').value)return fail('Pon la fecha compromiso de firma.');o.fecha_compromiso_firma=$('cFechaFirma').value;}
@@ -1599,6 +1598,7 @@ async function renderDashboard(){
   const D=$('dashboard');
   await cargarRechazos();
   await cargarSupMap();
+  ACEL_HIST=null;
   const LEADS=dashLeads(), RECHAZOS=dashRechazos();
   const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length;
@@ -1655,6 +1655,7 @@ async function renderDashboard(){
       <div class="tbltabs" id="tbltabs">
         <button data-t="agente" class="on">Resumen por agente</button>
         <button data-t="dia">Leads por día</button>
+        <button data-t="acel">🚀 Aceleración</button>
         <button data-t="embudo">Embudo por agente</button>
         <button data-t="campana">Por campaña</button>
         <button data-t="global">Embudo global</button>
@@ -1756,6 +1757,64 @@ function tablaPorDia(){
   LAST_TABLA={headers,rows:[...rows,tot],name:'Leads_por_dia'};
   if(rows.length===0)return '<div class="dash-empty">Sin leads registrados en los últimos '+NDIAS+' días.</div>';
   return render_atable(headers,rows,tot);
+}
+let ACEL_HIST=null;
+async function cargarAcelHist(){
+  if(ACEL_HIST)return ACEL_HIST;
+  ACEL_HIST=new Set();
+  try{
+    const PAGE=1000;let d0=0;
+    while(true){
+      const {data,error}=await db.from('bitacora_movimientos').select('lead_id')
+        .or('etapa_anterior.eq.Aceleración pendiente,etapa_nueva.eq.Aceleración pendiente')
+        .range(d0,d0+PAGE-1);
+      if(error)break;
+      (data||[]).forEach(r=>ACEL_HIST.add(r.lead_id));
+      if(!data||data.length<PAGE)break;d0+=PAGE;
+    }
+  }catch(e){}
+  return ACEL_HIST;
+}
+async function tablaAcel(){
+  const hist=await cargarAcelHist();
+  const L=dashLeads();
+  const hoyDia=new Date().getDate();
+  const paso=L.filter(l=>hist.has(l.id)||l.etapa==='Aceleración pendiente');
+  const activas=paso.filter(l=>l.etapa==='Aceleración pendiente');
+  const conv=paso.filter(l=>l.etapa==='Venta exitosa');
+  const caidas=paso.filter(l=>l.etapa==='Lead caído');
+  const completa=l=>l.acel_tiene_ine&&l.acel_plan&&l.acel_equipo;
+  const lista=l=>!l.acel_dia_corte||hoyDia>=l.acel_dia_corte;
+  const A={};
+  paso.forEach(l=>{
+    const ag=l.agentes?.nombre||'—';
+    const o=A[ag]=A[ag]||{act:0,listas:0,comp:0,inc:0,conv:0,caid:0};
+    if(l.etapa==='Aceleración pendiente'){o.act++;if(lista(l))o.listas++;if(completa(l))o.comp++;else o.inc++;}
+    else if(l.etapa==='Venta exitosa')o.conv++;
+    else if(l.etapa==='Lead caído')o.caid++;
+  });
+  const headers=['Agente','Activas','Listas HOY','Completas (INE+plan+equipo)','Incompletas','Convertidas ✅','Caídas','Conversión'];
+  const rows=Object.entries(A).map(([ag,o])=>{
+    const cerradas=o.conv+o.caid;
+    return [ag,o.act,o.listas,o.comp,o.inc,o.conv,o.caid,cerradas?Math.round(o.conv*100/cerradas)+'%':'—'];
+  }).sort((a,b)=>b[5]-a[5]);
+  const T=Object.values(A).reduce((s,o)=>({act:s.act+o.act,listas:s.listas+o.listas,comp:s.comp+o.comp,inc:s.inc+o.inc,conv:s.conv+o.conv,caid:s.caid+o.caid}),{act:0,listas:0,comp:0,inc:0,conv:0,caid:0});
+  const cerrT=T.conv+T.caid;
+  const tot=['TOTAL',T.act,T.listas,T.comp,T.inc,T.conv,T.caid,cerrT?Math.round(T.conv*100/cerrT)+'%':'—'];
+  LAST_TABLA={headers,rows:[...rows,tot],name:'Aceleraciones'};
+  const incSinIne=activas.filter(l=>!l.acel_tiene_ine).length;
+  const incSinPlan=activas.filter(l=>l.acel_tiene_ine&&!(l.acel_plan&&l.acel_equipo)).length;
+  const resumen=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800">${T.act}</div><div class="dc-sub">🚀 Activas ahora</div></div>
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#B45309">${T.listas}</div><div class="dc-sub">⚡ Listas para subir HOY</div></div>
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#DC2626">${incSinIne}</div><div class="dc-sub">📄 Sin INE aún</div></div>
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#D97706">${incSinPlan}</div><div class="dc-sub">🛒 Con INE, sin plan/equipo</div></div>
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#16A34A">${T.conv}</div><div class="dc-sub">✅ Convertidas a venta</div></div>
+    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800">${cerrT?Math.round(T.conv*100/cerrT)+'%':'—'}</div><div class="dc-sub">🎯 Tasa de conversión</div></div>
+  </div>
+  <div class="hint" style="margin-bottom:10px">Conversión = convertidas ÷ (convertidas + caídas) de todo lead que pasó por Aceleración (histórico de bitácora). "Completa" = INE recibido + plan y equipo definidos: lista para subir en cuanto llegue su corte.</div>`;
+  if(!paso.length)return resumen+'<div class="dash-empty">Ningún lead ha pasado por Aceleración pendiente todavía.</div>';
+  return resumen+render_atable(headers,rows,tot);
 }
 function tablaAgente(){
   const LEADS=dashLeads();
@@ -1870,6 +1929,7 @@ function renderTablas(which){
   const c=$('tablaCont');
   if(which==='agente')c.innerHTML=tablaAgente();
   else if(which==='dia')c.innerHTML=tablaPorDia();
+  else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if($('tablaCont'))$('tablaCont').innerHTML=h;});}
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
   else if(which==='campana')c.innerHTML=tablaCampana();
   else c.innerHTML=tablaGlobal();
