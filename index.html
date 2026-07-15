@@ -308,6 +308,7 @@ tbody tr:hover{background:#F7F8FF}
       <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf">sobre viables</div></div>
     </div>
     <div id="pendPanel"></div>
+    <div id="acelChip" class="hidden" style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:inline-block"></div>
     <div class="toolbar">
       <div class="search"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" type="text" placeholder="Buscar por teléfono o nombre…"></div>
       <div class="selectwrap"><select id="filterEstado">
@@ -892,6 +893,12 @@ function renderPendientes(){
 // ===== RENDER TABLA =====
 function render(){
   renderPendientes();
+  const _ac=$('acelChip');
+  if(_ac){
+    const nombres={listas:'⚡ Listas para subir HOY',sinine:'📄 Sin INE aún',sinplan:'🛒 Con INE, sin plan/equipo'};
+    if(ACEL_SUB&&$('filterEtapa').value==='Aceleración pendiente'){_ac.innerHTML='Filtro: <b>'+nombres[ACEL_SUB]+'</b> <span style="cursor:pointer;font-weight:800">✕</span>';_ac.classList.remove('hidden');_ac.querySelector('span').onclick=()=>{ACEL_SUB=null;render();};}
+    else _ac.classList.add('hidden');
+  }
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
   const etF=$('filterEtapa')?$('filterEtapa').value:'';
   let rows=LEADS.filter(l=>{
@@ -904,6 +911,12 @@ function render(){
     if(agF&&String(l.agente_id)!==agF)return false;
     if(etF==='__sin__'&&l.etapa)return false;
     if(etF==='__ventahoy__'&&!(l.etapa==='Venta exitosa'&&diaLocal(l.fecha_venta||l.ultimo_movimiento)===isoLocal(new Date())))return false;
+    if(ACEL_SUB&&etF==='Aceleración pendiente'){
+      const hd=new Date().getDate();
+      if(ACEL_SUB==='listas'&&!(!l.acel_dia_corte||hd>=l.acel_dia_corte))return false;
+      if(ACEL_SUB==='sinine'&&l.acel_tiene_ine)return false;
+      if(ACEL_SUB==='sinplan'&&!(l.acel_tiene_ine&&!(l.acel_plan&&l.acel_equipo)))return false;
+    }
     if(etF&&!['__sin__','__ventahoy__'].includes(etF)&&l.etapa!==etF)return false;
     return true;
   });
@@ -1758,7 +1771,7 @@ function tablaPorDia(){
   if(rows.length===0)return '<div class="dash-empty">Sin leads registrados en los últimos '+NDIAS+' días.</div>';
   return render_atable(headers,rows,tot);
 }
-let ACEL_HIST=null;
+let ACEL_HIST=null, ACEL_SUB=null;
 async function cargarAcelHist(){
   if(ACEL_HIST)return ACEL_HIST;
   ACEL_HIST=new Set();
@@ -1805,10 +1818,10 @@ async function tablaAcel(){
   const incSinIne=activas.filter(l=>!l.acel_tiene_ine).length;
   const incSinPlan=activas.filter(l=>l.acel_tiene_ine&&!(l.acel_plan&&l.acel_equipo)).length;
   const resumen=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800">${T.act}</div><div class="dc-sub">🚀 Activas ahora</div></div>
-    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#B45309">${T.listas}</div><div class="dc-sub">⚡ Listas para subir HOY</div></div>
-    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#DC2626">${incSinIne}</div><div class="dc-sub">📄 Sin INE aún</div></div>
-    <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#D97706">${incSinPlan}</div><div class="dc-sub">🛒 Con INE, sin plan/equipo</div></div>
+    <div class="dash-card acelCard" data-acel="todas" style="flex:1;min-width:130px;padding:12px;cursor:pointer" title="Ver la lista en Operación"><div style="font-size:22px;font-weight:800">${T.act}</div><div class="dc-sub">🚀 Activas ahora</div></div>
+    <div class="dash-card acelCard" data-acel="listas" style="flex:1;min-width:130px;padding:12px;cursor:pointer" title="Ver la lista en Operación"><div style="font-size:22px;font-weight:800;color:#B45309">${T.listas}</div><div class="dc-sub">⚡ Listas para subir HOY</div></div>
+    <div class="dash-card acelCard" data-acel="sinine" style="flex:1;min-width:130px;padding:12px;cursor:pointer" title="Ver la lista en Operación"><div style="font-size:22px;font-weight:800;color:#DC2626">${incSinIne}</div><div class="dc-sub">📄 Sin INE aún</div></div>
+    <div class="dash-card acelCard" data-acel="sinplan" style="flex:1;min-width:130px;padding:12px;cursor:pointer" title="Ver la lista en Operación"><div style="font-size:22px;font-weight:800;color:#D97706">${incSinPlan}</div><div class="dc-sub">🛒 Con INE, sin plan/equipo</div></div>
     <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800;color:#16A34A">${T.conv}</div><div class="dc-sub">✅ Convertidas a venta</div></div>
     <div class="dash-card" style="flex:1;min-width:130px;padding:12px"><div style="font-size:22px;font-weight:800">${cerrT?Math.round(T.conv*100/cerrT)+'%':'—'}</div><div class="dc-sub">🎯 Tasa de conversión</div></div>
   </div>
@@ -1929,7 +1942,12 @@ function renderTablas(which){
   const c=$('tablaCont');
   if(which==='agente')c.innerHTML=tablaAgente();
   else if(which==='dia')c.innerHTML=tablaPorDia();
-  else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if($('tablaCont'))$('tablaCont').innerHTML=h;});}
+  else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if(!$('tablaCont'))return;$('tablaCont').innerHTML=h;
+    $('tablaCont').querySelectorAll('.acelCard').forEach(cd=>cd.onclick=()=>{
+      ACEL_SUB=cd.dataset.acel==='todas'?null:cd.dataset.acel;
+      $('filterEtapa').value='Aceleración pendiente';
+      setSeccion('operacion');render();
+    });});}
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
   else if(which==='campana')c.innerHTML=tablaCampana();
   else c.innerHTML=tablaGlobal();
@@ -3892,7 +3910,7 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',render);$('sortLeads').addEventListener('change',render);
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',()=>{ACEL_SUB=null;render();});$('sortLeads').addEventListener('change',render);
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
