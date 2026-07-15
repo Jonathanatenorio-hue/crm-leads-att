@@ -855,8 +855,8 @@ function renderPendientes(){
   const ahora=Date.now(),hoyDia=new Date().getDate();
   const vivos=LEADS.filter(l=>l.viabilidad==='VIABLE'&&!['Venta exitosa','Lead caído'].includes(l.etapa||''));
   const acel=vivos.filter(l=>l.etapa==='Aceleración pendiente');
-  const acelListas=acel.filter(l=>!l.acel_dia_corte||hoyDia>=l.acel_dia_corte);
-  const acelEspera=acel.filter(l=>l.acel_dia_corte&&hoyDia<l.acel_dia_corte);
+  const acelListas=acel.filter(l=>acelSubibleHoy(l));
+  const acelEspera=acel.filter(l=>!acelSubibleHoy(l));
   const refMov=l=>Math.max(new Date(l.ultimo_movimiento||l.creado_en||0).getTime(),l._notaFecha?new Date(l._notaFecha).getTime():0);
   const hoyIso=isoLocal(new Date());
   const prog=vivos.filter(l=>l.proximo_contacto&&l.proximo_contacto<=hoyIso)
@@ -883,7 +883,7 @@ function renderPendientes(){
     <h3>🔔 Tus pendientes de hoy</h3>
     ${prog.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#047857">📅 Contactos programados para hoy${prog.some(l=>l.proximo_contacto<hoyIso)?' (incluye vencidos)':''} (${prog.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${prog.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" title="${(l.proximo_contacto_nota||'').replace(/"/g,'&quot;')}" style="border:1px solid ${l.proximo_contacto<hoyIso?'#FECACA;background:#FEF2F2':'#A7F3D0;background:#ECFDF5'};border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.proximo_contacto<hoyIso?' · vencido '+fechaCorta(l.proximo_contacto):''}</button>`).join(' ')}${prog.length>10?` <span class="muted-cell" style="font-size:11px">+${prog.length-10} más</span>`:''}</div></div>`:''}
     ${acelListas.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B45309">🚀 Aceleraciones LISTAS para subir hoy (${acelListas.length}) — ¡véndelas ya!</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(acelListas,12)}</div></div>`:''}
-    ${acelEspera.length?`<div style="margin-top:10px"><div style="font-weight:600;font-size:12.5px" class="muted-cell">⏳ Aceleraciones en espera de corte (${acelEspera.length}): ${acelEspera.slice(0,6).map(l=>l.telefono+' (día '+l.acel_dia_corte+')').join(' · ')}${acelEspera.length>6?' · +'+(acelEspera.length-6):''}</div></div>`:''}
+    ${acelEspera.length?`<div style="margin-top:10px"><div style="font-weight:600;font-size:12.5px" class="muted-cell">⏳ Aceleraciones en espera de corte (${acelEspera.length}): ${acelEspera.slice(0,6).map(l=>{const f=calcFechaSubir(l.acel_fecha_ultima_cuota,l.acel_dia_corte);return l.telefono+' ('+(f?fechaCorta(f):'sin datos')+')';}).join(' · ')}${acelEspera.length>6?' · +'+(acelEspera.length-6):''}</div></div>`:''}
     ${sinMov.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B91C1C">⏰ Más de 24 hrs sin movimiento ni nota (${sinMov.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${sinMov.slice(0,8).map(l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid #FECACA;background:#FEF2F2;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono} · ${horas(l)}h</button>`).join(' ')}${sinMov.length>8?` <span class="muted-cell" style="font-size:11px">+${sinMov.length-8} más</span>`:''}</div></div>`:''}
     ${sinContacto.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#4338CA">🆕 Sin primer contacto (${sinContacto.length}) — tipifícalos hoy</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(sinContacto)}</div></div>`:''}
     ${coaching}
@@ -913,7 +913,7 @@ function render(){
     if(etF==='__ventahoy__'&&!(l.etapa==='Venta exitosa'&&diaLocal(l.fecha_venta||l.ultimo_movimiento)===isoLocal(new Date())))return false;
     if(ACEL_SUB&&etF==='Aceleración pendiente'){
       const hd=new Date().getDate();
-      if(ACEL_SUB==='listas'&&!(!l.acel_dia_corte||hd>=l.acel_dia_corte))return false;
+      if(ACEL_SUB==='listas'&&!acelSubibleHoy(l))return false;
       if(ACEL_SUB==='sinine'&&l.acel_tiene_ine)return false;
       if(ACEL_SUB==='sinplan'&&!(l.acel_tiene_ine&&!(l.acel_plan&&l.acel_equipo)))return false;
     }
@@ -1018,6 +1018,12 @@ function recalcViab(){
 }
 
 // ===== ACELERACIÓN cálculo =====
+function acelSubibleHoy(l){
+  const f=calcFechaSubir(l.acel_fecha_ultima_cuota,l.acel_dia_corte);
+  if(!f)return false;
+  const hoy=new Date();hoy.setHours(23,59,59,999);
+  return f<=hoy;
+}
 function calcFechaSubir(ucStr,dia){
   if(!ucStr||!dia)return null;
   const uc=new Date(ucStr+'T00:00:00');let y=uc.getFullYear(),m=uc.getMonth();
@@ -1797,7 +1803,7 @@ async function tablaAcel(){
   const conv=paso.filter(l=>l.etapa==='Venta exitosa');
   const caidas=paso.filter(l=>l.etapa==='Lead caído');
   const completa=l=>l.acel_tiene_ine&&l.acel_plan&&l.acel_equipo;
-  const lista=l=>!l.acel_dia_corte||hoyDia>=l.acel_dia_corte;
+  const lista=l=>acelSubibleHoy(l);
   const A={};
   paso.forEach(l=>{
     const ag=l.agentes?.nombre||'—';
