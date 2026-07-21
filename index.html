@@ -484,6 +484,10 @@ tbody tr:hover{background:#F7F8FF}
       <div class="etapa-grid" id="etapaGrid"></div>
 
       <!-- campos condicionales -->
+      <div class="cond hidden" id="f-sinano">
+        <div class="field"><label>Fecha efectiva de su plan actual (obligatoria)</label><input type="date" id="snFecha"></div>
+        <div class="hint hidden" id="snCalc" style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:8px 12px"><span id="snCumple"></span></div>
+      </div>
       <div class="cond hidden" id="f-mensualidad">
         <div class="hint">Cliente al corriente en sus otras líneas — solo debe la factura del mes. El monto queda registrado en "Monto del adeudo" de arriba (obligatorio).</div>
       </div>
@@ -638,6 +642,7 @@ async function agregarNota(){
 const ETAPAS=[
   {v:'Inicio de negociación',d:'Primer contacto en curso'},
   {v:'Adeudo mensualidad',d:'Solo debe su factura del mes'},
+  {v:'Interesado (sin cumplir año)',d:'Le interesa; su plan aún no cumple el año'},
   {v:'Cotización enviada',d:'Sugerida al inicio'},
   {v:'Aceleración pendiente',d:'Aún no se puede subir'},
   {v:'Falta INE o biométrico',d:'Esperando documento'},
@@ -861,7 +866,12 @@ function renderPendientes(){
   const hoyIso=isoLocal(new Date());
   const prog=vivos.filter(l=>l.proximo_contacto&&l.proximo_contacto<=hoyIso)
     .sort((a,b)=>(a.proximo_contacto<b.proximo_contacto?-1:1));
-  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'&&(ahora-refMov(l))>864e5
+  const cumpleIso=l=>{const f=fechaCumpleAno(l.fecha_efectiva);return f?isoLocal(f):null;};
+  const anProx=vivos.filter(l=>l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)<=hoyIso)
+    .sort((a,b)=>(cumpleIso(a)<cumpleIso(b)?-1:1));
+  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'
+      &&!(l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)>hoyIso)
+      &&(ahora-refMov(l))>864e5
       &&!(l.proximo_contacto&&l.proximo_contacto>hoyIso))
     .sort((a,b)=>refMov(a)-refMov(b));
   const sinContacto=vivos.filter(l=>!l.etapa);
@@ -875,12 +885,13 @@ function renderPendientes(){
       📉 Llevas <b>${caidos14.length} leads caídos</b> en 2 semanas — motivo principal: <b>${top[0]}</b> (${top[1]}).
       Acércate con <b>${sup}</b> para trabajar juntos esa objeción. 💪</div>`;
   }
-  if(!prog.length&&!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
+  if(!anProx.length&&!prog.length&&!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
   const chip=l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`;
   const lista=(arr,max=8)=>arr.slice(0,max).map(chip).join(' ')+(arr.length>max?` <span class="muted-cell" style="font-size:11px">+${arr.length-max} más</span>`:'');
   const horas=l=>Math.round((ahora-refMov(l))/36e5);
   P.innerHTML=`<div class="dash-card" style="margin-bottom:16px">
     <h3>🔔 Tus pendientes de hoy</h3>
+    ${anProx.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#7C3AED">🎂 ¡Cumplieron su año — se pueden vender YA! (${anProx.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${anProx.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid #DDD6FE;background:#F5F3FF;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`).join(' ')}${anProx.length>10?` <span class="muted-cell" style="font-size:11px">+${anProx.length-10} más</span>`:''}</div></div>`:''}
     ${prog.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#047857">📅 Contactos programados para hoy${prog.some(l=>l.proximo_contacto<hoyIso)?' (incluye vencidos)':''} (${prog.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${prog.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" title="${(l.proximo_contacto_nota||'').replace(/"/g,'&quot;')}" style="border:1px solid ${l.proximo_contacto<hoyIso?'#FECACA;background:#FEF2F2':'#A7F3D0;background:#ECFDF5'};border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.proximo_contacto<hoyIso?' · vencido '+fechaCorta(l.proximo_contacto):''}</button>`).join(' ')}${prog.length>10?` <span class="muted-cell" style="font-size:11px">+${prog.length-10} más</span>`:''}</div></div>`:''}
     ${acelListas.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B45309">🚀 Aceleraciones LISTAS para subir hoy (${acelListas.length}) — ¡véndelas ya!</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(acelListas,12)}</div></div>`:''}
     ${acelEspera.length?`<div style="margin-top:10px"><div style="font-weight:600;font-size:12.5px" class="muted-cell">⏳ Aceleraciones en espera de corte (${acelEspera.length}): ${acelEspera.slice(0,6).map(l=>{const f=calcFechaSubir(l.acel_fecha_ultima_cuota,l.acel_dia_corte);return l.telefono+' ('+(f?fechaCorta(f):'sin datos')+')';}).join(' · ')}${acelEspera.length>6?' · +'+(acelEspera.length-6):''}</div></div>`:''}
@@ -939,9 +950,11 @@ function render(){
     const _hoyIso=isoLocal(new Date());
     const pcChip=l.proximo_contacto&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?
       ' <span class="badge" style="font-size:10px;padding:2px 7px;'+(l.proximo_contacto<_hoyIso?'background:#FEE2E2;color:#991B1B':(l.proximo_contacto===_hoyIso?'background:#D1FAE5;color:#065F46':'background:#F3F4F6;color:#475569'))+'" title="'+String(l.proximo_contacto_nota||'Próximo contacto').replace(/"/g,'&quot;')+'">📅 '+(l.proximo_contacto===_hoyIso?'HOY':fechaCorta(l.proximo_contacto))+'</span>':'';
+    const _fc=l.etapa==='Interesado (sin cumplir año)'?fechaCumpleAno(l.fecha_efectiva):null;
+    const anChip=_fc?' <span class="badge" style="font-size:10px;padding:2px 7px;'+(isoLocal(_fc)<=_hoyIso?'background:#EDE9FE;color:#6D28D9;font-weight:800':'background:#F3F4F6;color:#475569')+'" title="Fecha efectiva: '+(l.fecha_efectiva||'')+'">🎂 '+(isoLocal(_fc)<=_hoyIso?'¡Cumplió!':fechaCorta(_fc))+'</span>':'';
     const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===_hoyIso)||diaLocal(l.ultimo_movimiento)===_hoyIso;
     const segChip=segHoy&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Con nota o movimiento de hoy">✓ hoy</span>':'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip;
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+anChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
@@ -987,8 +1000,8 @@ function setEtapasPermitidas(lista){
   });
 }
 function showEtapaFields(){
-  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic'].forEach(x=>hide($(x)));
-  const map={'Aceleración pendiente':'f-acel','Falta INE o biométrico':'f-faltaine','Falta contrato firmado':'f-contrato','Falta pago inicial':'f-pago','Venta exitosa':'f-venta','Lead caído':'f-caido','Adeudo mensualidad':'f-mensualidad','Línea adicional':'f-lineaadic'};
+  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano'].forEach(x=>hide($(x)));
+  const map={'Aceleración pendiente':'f-acel','Falta INE o biométrico':'f-faltaine','Falta contrato firmado':'f-contrato','Falta pago inicial':'f-pago','Venta exitosa':'f-venta','Lead caído':'f-caido','Adeudo mensualidad':'f-mensualidad','Línea adicional':'f-lineaadic','Interesado (sin cumplir año)':'f-sinano'};
   if(map[st.etapa])show($(map[st.etapa]));
 }
 
@@ -1017,6 +1030,25 @@ function recalcViab(){
   }
 }
 
+// ===== SIN CUMPLIR AÑO cálculo =====
+function fechaCumpleAno(feStr){
+  if(!feStr)return null;
+  const d=new Date(feStr+'T12:00:00');if(isNaN(d))return null;
+  const c=new Date(d);c.setFullYear(c.getFullYear()+1);
+  if(c.getDate()!==d.getDate())c.setDate(0);
+  return c;
+}
+function recalcSinAno(){
+  const f=fechaCumpleAno($('snFecha').value);
+  const box=$('snCalc');
+  if(!f){box.classList.add('hidden');return;}
+  const hoy=new Date();hoy.setHours(0,0,0,0);
+  const dias=Math.ceil((f-hoy)/864e5);
+  box.classList.remove('hidden');
+  $('snCumple').innerHTML=dias<=0
+    ? '🎂 <b>¡Ya cumplió su año!</b> ('+fechaLarga(f)+') — se puede vender YA'
+    : 'Cumple su año el <b>'+fechaLarga(f)+'</b> — faltan '+dias+' días. El CRM te avisará ese día.';
+}
 // ===== ACELERACIÓN cálculo =====
 function acelSubibleHoy(l){
   const f=calcFechaSubir(l.acel_fecha_ultima_cuota,l.acel_dia_corte);
@@ -1055,7 +1087,8 @@ function abrirDrawer(lead){
   ['segAdeudo','segRenovar','segIne','segFaltaQue'].forEach(s=>$(s).querySelectorAll('button').forEach(b=>b.className=''));
   hide($('fMontoAdeudo'));hide($('fNoRenovar'));hide($('secTip'));
   $('etapaGrid').querySelectorAll('.etapa-opt').forEach(x=>x.classList.remove('sel'));
-  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic'].forEach(x=>hide($(x)));
+  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano'].forEach(x=>hide($(x)));
+  $('snFecha').value='';$('snCalc').classList.add('hidden');
   $('notaIniW').classList.toggle('hidden',!!lead);$('notaIni').value='';
   $('segLinEq').querySelectorAll('button').forEach(b=>b.className='');hide($('lEquipoW'));$('lPlan').value='';$('lEquipo').value='';
   $('pcFecha').value='';$('pcNota').value='';
@@ -1074,6 +1107,7 @@ function abrirDrawer(lead){
     if(lead.acel_ine_url){st.ineUrl=lead.acel_ine_url;show($('aIneOk'));}
     if(lead.falta_que){st.faltaQue=lead.falta_que;segSet('segFaltaQue',lead.falta_que);}
     $('pcFecha').value=lead.proximo_contacto||'';$('pcNota').value=lead.proximo_contacto_nota||'';
+    if(lead.fecha_efectiva){$('snFecha').value=lead.fecha_efectiva;recalcSinAno();}
     if(lead.etapa==='Línea adicional'){
       $('lPlan').value=lead.acel_plan||'';
       const eq=lead.acel_equipo==='Sin equipo'?'Sin equipo':(lead.acel_equipo?'Con equipo':null);
@@ -1107,6 +1141,10 @@ async function guardar(){
     if(viable&&!st.etapa)return fail('Selecciona la tipificación.');
     if(!viable&&st.etapa&&!['Adeudo mensualidad','Lead caído'].includes(st.etapa))return fail('Con adeudo solo puedes tipificar Adeudo mensualidad o Lead caído.');
     if(st.etapa==='Adeudo mensualidad'&&st.adeudo!=='Sí')return fail('Para Adeudo mensualidad marca ¿Tiene adeudo? = Sí y captura el monto del mes.');
+    if(st.etapa==='Interesado (sin cumplir año)'){
+      if(!$('snFecha').value)return fail('Captura la fecha efectiva de su plan — de ahí calculamos cuándo cumple el año.');
+      o.fecha_efectiva=$('snFecha').value;
+    }
     if(st.etapa==='Línea adicional'){
       if(!st.linEq)return fail('Indica si la línea adicional es con o sin equipo.');
       if(!$('lPlan').value.trim())return fail('Escribe el plan para la línea adicional.');
@@ -1178,11 +1216,12 @@ let vista='tabla', dragLeadId=null;
 const KCOLS=[
   {e:'Inicio de negociación',c:'#64748B'},
   {e:'Adeudo mensualidad',c:'#E11D48'},
+  {e:'Interesado (sin cumplir año)',c:'#8B5CF6'},
   {e:'Cotización enviada',c:'#4F46E5'},{e:'Aceleración pendiente',c:'#D97706'},
   {e:'Falta INE o biométrico',c:'#0891B2'},{e:'Falta contrato firmado',c:'#7C3AED'},
   {e:'Falta pago inicial',c:'#DB2777'},{e:'Línea adicional',c:'#0EA5E9'},{e:'Venta exitosa',c:'#16A34A'},{e:'Lead caído',c:'#DC2626'}
 ];
-const REQUIERE_CAMPOS=['Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído','Adeudo mensualidad','Línea adicional'];
+const REQUIERE_CAMPOS=['Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído','Adeudo mensualidad','Línea adicional','Interesado (sin cumplir año)'];
 
 function setVista(v){
   vista=v;
@@ -1624,8 +1663,8 @@ async function renderDashboard(){
   const rech=RECHAZOS.length;
   const conv=viab?Math.round(vent/viab*100):0;
   const tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
-  const ETS=['Inicio de negociación','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído'];
-  const ECOL={'Inicio de negociación':'#64748B','Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
+  const ETS=['Inicio de negociación','Adeudo mensualidad','Interesado (sin cumplir año)','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído'];
+  const ECOL={'Inicio de negociación':'#64748B','Adeudo mensualidad':'#E11D48','Interesado (sin cumplir año)':'#8B5CF6','Línea adicional':'#0EA5E9','Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
   const porEtapa=ETS.map(e=>({e,n:LEADS.filter(l=>l.etapa===e).length}));
   // agentes
   const pa={};LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';(pa[n]=pa[n]||{v:0,vt:0});if(l.viabilidad==='VIABLE')pa[n].v++;if(l.etapa==='Venta exitosa')pa[n].vt++;});
@@ -3937,6 +3976,7 @@ bindSeg('segRenovar',v=>{st.renovable=v;$('fNoRenovar').classList.toggle('hidden
 bindSeg('segIne',v=>{st.ine=v;$('aIneFile').classList.toggle('hidden',v!=='Sí');$('aVentaFields').classList.toggle('hidden',v!=='Sí');});
 bindSeg('segFaltaQue',v=>{st.faltaQue=v;});
 bindSeg('segLinEq',v=>{st.linEq=v;$('lEquipoW').classList.toggle('hidden',v!=='Con equipo');});
+$('snFecha').addEventListener('input',recalcSinAno);
 $('dPrepago').addEventListener('change',recalcViab);
 $('aUltimaCuota').addEventListener('change',recalcAcel);$('aDiaCorte').addEventListener('input',recalcAcel);
 $('aEquipo').addEventListener('input',e=>{$('aAppsField').classList.toggle('hidden',!e.target.value.trim());});
