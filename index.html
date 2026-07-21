@@ -303,9 +303,9 @@ tbody tr:hover{background:#F7F8FF}
     <div id="opSection">
     <div class="kpis">
       <div class="kpi"><div class="kl">Leads</div><div class="kv" id="kLeads">0</div><div class="kf">registrados</div></div>
-      <div class="kpi"><div class="kl">Viables</div><div class="kv c" id="kViab">0</div><div class="kf" id="kViabPct">—</div></div>
+      <div class="kpi"><div class="kl">Viables (vendibles)</div><div class="kv c" id="kViab">0</div><div class="kf" id="kViabPct">—</div></div>
       <div class="kpi"><div class="kl">Ventas</div><div class="kv g" id="kVentas">0</div><div class="kf">cerradas</div></div>
-      <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf">sobre viables</div></div>
+      <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf" id="kConvFoot">sobre vendibles</div></div>
     </div>
     <div id="pendPanel"></div>
     <div id="acelChip" class="hidden" style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:inline-block"></div>
@@ -870,7 +870,7 @@ function renderPendientes(){
   const manIso=(()=>{const d=new Date();d.setDate(d.getDate()+1);return isoLocal(d);})();
   const anProx=vivos.filter(l=>l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)<=manIso)
     .sort((a,b)=>(cumpleIso(a)<cumpleIso(b)?-1:1));
-  const sinMov=vivos.filter(l=>l.etapa&&l.etapa!=='Aceleración pendiente'
+  const sinMov=vivos.filter(l=>l.etapa&&!(l.etapa==='Aceleración pendiente'&&!acelSubibleHoy(l))
       &&!(l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)>manIso)
       &&(ahora-refMov(l))>864e5
       &&!(l.proximo_contacto&&l.proximo_contacto>hoyIso))
@@ -937,9 +937,13 @@ function render(){
   if(ordF==='pendiente')rows.sort((a,b)=>ultAct(a)-ultAct(b));
   else if(ordF==='seguido')rows.sort((a,b)=>ultAct(b)-ultAct(a));
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
-  $('kLeads').textContent=LEADS.length;$('kViab').textContent=viab;
-  $('kViabPct').textContent=LEADS.length?Math.round(viab/LEADS.length*100)+'% del total':'—';
-  $('kVentas').textContent=vent;$('kConv').textContent=viab?Math.round(vent/viab*100)+'%':'—';
+  const madur=LEADS.filter(l=>enMaduracion(l)).length;
+  const esper=LEADS.filter(l=>enEsperaAcel(l)).length;
+  const viabVend=viab-madur-esper;
+  $('kLeads').textContent=LEADS.length;$('kViab').textContent=viabVend;
+  $('kViabPct').textContent=(LEADS.length?Math.round(viab/LEADS.length*100)+'% viable':'—')+(madur?' · '+madur+' 🎂':'')+(esper?' · '+esper+' ⏳':'');
+  $('kVentas').textContent=vent;$('kConv').textContent=viabVend>0?Math.round(vent/viabVend*100)+'%':'—';
+  const _kcf=$('kConvFoot');if(_kcf)_kcf.textContent='sobre vendibles';
   const tb=$('tbody');tb.innerHTML='';
   if(rows.length===0){show($('empty'));document.querySelector('table').style.display='none';return;}
   hide($('empty'));document.querySelector('table').style.display='';
@@ -1062,6 +1066,13 @@ function acelSubibleHoy(l){
   if(!f)return false;
   const hoy=new Date();hoy.setHours(23,59,59,999);
   return f<=hoy;
+}
+function enEsperaAcel(l){
+  if(l.etapa!=='Aceleración pendiente')return false;
+  const f=calcFechaSubir(l.acel_fecha_ultima_cuota,l.acel_dia_corte);
+  if(!f)return false;   // sin fechas capturadas: cuenta como vendible (no hay escondite sin dato)
+  const hoy=new Date();hoy.setHours(23,59,59,999);
+  return f>hoy;
 }
 function calcFechaSubir(ucStr,dia){
   if(!ucStr||!dia)return null;
@@ -1502,8 +1513,8 @@ function resumenCRM(){
   const porAgente={},porDia={},porCamp={},agDia={};
   LEADS.forEach(l=>{
     const ag=l.agentes?.nombre||'—',d=dia(l.creado_en),cp=l.campanas?.nombre||'—';
-    const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,madurando:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
-    A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(enMaduracion(l))A.madurando++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
+    const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,madurando:0,esperando_corte:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
+    A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(enMaduracion(l))A.madurando++;if(enEsperaAcel(l))A.esperando_corte++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
     const D=porDia[d]=porDia[d]||{leads:0,viables:0,ventas:0};D.leads++;if(l.viabilidad==='VIABLE')D.viables++;
     if(l.etapa==='Venta exitosa'){const dv=dia(l.fecha_venta||l.creado_en);(porDia[dv]=porDia[dv]||{leads:0,viables:0,ventas:0}).ventas++;}
     const C=porCamp[cp]=porCamp[cp]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0};C.leads++;if(l.viabilidad==='VIABLE')C.viables++;if(l.etapa==='Venta exitosa')C.ventas++;
@@ -1519,7 +1530,7 @@ function resumenCRM(){
   return {fecha_hoy:hoy,total_leads:LEADS.length,total_rechazos:(RECHAZOS||[]).length,
     por_etapa:etapas,por_agente:porAgente,por_agente_etapa:porAgenteEtapa,por_dia_ultimos_30:dias30,
     leads_por_agente_por_dia_ultimos_14:agDia14,por_campana:porCamp,
-    nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando); madurando=Interesado sin cumplir año con aniversario futuro (no cuentan como vendibles hasta la víspera); los rechazos pertenecen a campañas, no a agentes'};
+    nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; al llegar su fecha vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
 }
 function informeWhats(){
   const hoyTxt=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
@@ -1533,6 +1544,7 @@ function informeWhats(){
     if(l.etapa==='Lead caído')return;
     if(l.viabilidad!=='VIABLE')return;           // solo cartera viva: viables sin cerrar ni caer
     if(enMaduracion(l))return;                   // 🎂 hibernando: no cuentan hasta la víspera
+    if(enEsperaAcel(l))return;                   // ⏳ aceleración esperando corte: fuera de la cartera del día
     o.activos++;
     const e=l.etapa||'Sin tipificar';o.et[e]=(o.et[e]||0)+1;
   });
@@ -1552,6 +1564,8 @@ function informeWhats(){
   t+='━━━━━━━━━━━━━━\n';
   t+='🎯 *'+activosTot+' leads vivos para vender hoy* · '+ventTot+' ventas acumuladas\n';
   t+='🔥 *'+cerca+' a un paso de cerrar* (pago/contrato/INE/aceleración)\n';
+  const espTot=LEADS.filter(l=>enEsperaAcel(l)).length;
+  if(espTot)t+='⏳ '+espTot+' aceleraciones esperando su corte (con fecha) — prepáralas: INE + plan\n';
   if(sinTip)t+='⚠️ '+sinTip+' viables sin tipificar — ¡primer contacto pendiente!\n';
   t+='¡Vamos por un día histórico! 💪';
   navigator.clipboard.writeText(t).then(()=>toast('Informe copiado — pégalo en WhatsApp'),()=>{});
@@ -1673,7 +1687,8 @@ async function renderDashboard(){
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length;
   const rech=RECHAZOS.length;
   const madurando=LEADS.filter(l=>enMaduracion(l)).length;
-  const viabVend=viab-madurando;
+  const espera=LEADS.filter(l=>enEsperaAcel(l)).length;
+  const viabVend=viab-madurando-espera;
   const conv=viabVend>0?Math.round(vent/viabVend*100):0;
   const tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
   const ETS=['Inicio de negociación','Adeudo mensualidad','Interesado (sin cumplir año)','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído'];
@@ -1708,9 +1723,10 @@ async function renderDashboard(){
     <div class="kpis6">
       <div class="kpi kpi-pro p1"><div class="kl">Leads</div><div class="kv" data-cu="${total}">0</div><div class="kf">en el sistema</div></div>
       <div class="kpi kpi-pro p2"><div class="kl">Viables (vendibles)</div><div class="kv c" data-cu="${viabVend}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% viable del total</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">interesados sin cumplir año</div></div>
+      <div class="kpi kpi-pro p2"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">sin cumplir año</div></div>
+      <div class="kpi kpi-pro p2"><div class="kl">⏳ Esperando corte</div><div class="kv" style="color:#D97706" data-cu="${espera}">0</div><div class="kf">aceleraciones con fecha futura</div></div>
       <div class="kpi kpi-pro p3"><div class="kl">Ventas</div><div class="kv g" data-cu="${vent}">0</div><div class="kf">cerradas</div></div>
-      <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂 madurando':''}</div></div>
+      <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂':''}${espera?' · '+espera+' ⏳':''}</div></div>
       <div class="kpi kpi-pro p5"><div class="kl">Rechazos</div><div class="kv r" data-cu="${rech}">0</div><div class="kf">fuera de cartera</div></div>
       <div class="kpi kpi-pro p6"><div class="kl">Tasa rechazo</div><div class="kv a" data-cu="${tasaRech}" data-suf="%">0</div><div class="kf">de la base total</div></div>
     </div>
@@ -1891,18 +1907,19 @@ async function tablaAcel(){
 function tablaAgente(){
   const LEADS=dashLeads();
   const A={};
-  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,mad:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
+  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,mad:0,esp:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
     a.leads++;
     if(enMaduracion(l))a.mad++;
+    if(enEsperaAcel(l))a.esp++;
     if(l.viabilidad==='VIABLE')a.viab++;
     else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')a.nvAd++;else a.nvRe++;}
     else a.def++;
     if(l.etapa==='Venta exitosa')a.vent++;
     a.adeudo+=(l.monto_adeudo||0);});
-  const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.mad,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,Math.max(o.viab-o.mad,0)),money(o.adeudo)]).sort((a,b)=>b[8]-a[8]||b[2]-a[2]);
-  const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.mad+=o.mad;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,mad:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
-  const totalRow=['TOTAL',T.leads,T.viab,T.mad,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,Math.max(T.viab-T.mad,0)),money(T.adeudo)];
-  const headers=['Agente','Leads','Viables','🎂 Madurando','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv. (vendibles)','Adeudo ($)'];
+  const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.mad,o.esp,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,Math.max(o.viab-o.mad-o.esp,0)),money(o.adeudo)]).sort((a,b)=>b[9]-a[9]||b[2]-a[2]);
+  const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.mad+=o.mad;t.esp+=o.esp;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,mad:0,esp:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
+  const totalRow=['TOTAL',T.leads,T.viab,T.mad,T.esp,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,Math.max(T.viab-T.mad-T.esp,0)),money(T.adeudo)];
+  const headers=['Agente','Leads','Viables','🎂 Madurando','⏳ Esp. corte','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv. (vendibles)','Adeudo ($)'];
   LAST_TABLA={headers,rows:[...rows,totalRow],name:'Resumen_por_agente'};
   return render_atable(headers,rows,totalRow);
 }
@@ -2024,7 +2041,10 @@ async function generarInforme(){
   await cargarRechazos();
   const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length, rech=RECHAZOS.length;
-  const conv=viab?Math.round(vent/viab*100):0, tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
+  const _madur=LEADS.filter(l=>enMaduracion(l)).length;
+  const _esp=LEADS.filter(l=>enEsperaAcel(l)).length;
+  const _viabV=Math.max(viab-_madur-_esp,0);
+  const conv=_viabV>0?Math.round(vent/_viabV*100):0, tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
   const enProceso=LEADS.filter(l=>l.viabilidad==='VIABLE'&&l.etapa&&l.etapa!=='Lead caído').length;
   const pa={};LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';(pa[n]=pa[n]||{v:0,vt:0});if(l.viabilidad==='VIABLE')pa[n].v++;if(l.etapa==='Venta exitosa')pa[n].vt++;});
   const agRank=Object.entries(pa).map(([n,o])=>({n,...o})).sort((a,b)=>b.vt-a.vt||b.v-a.v).slice(0,8);
@@ -2089,7 +2109,7 @@ tr:last-child td{border:none}
     <div class="k"><div class="kl">Viables</div><div class="kv c1">${viab}</div><div class="kf">${total?Math.round(viab/total*100):0}% del total</div></div>
     <div class="k"><div class="kl">En proceso</div><div class="kv c5">${enProceso}</div><div class="kf">en pipeline</div></div>
     <div class="k"><div class="kl">Ventas</div><div class="kv c2">${vent}</div><div class="kf">cerradas</div></div>
-    <div class="k"><div class="kl">Conversión</div><div class="kv c3">${conv}%</div><div class="kf">sobre viables</div></div>
+    <div class="k"><div class="kl">Conversión</div><div class="kv c3">${conv}%</div><div class="kf">sobre ${_viabV} vendibles${_madur?` · ${_madur} 🎂`:``}${_esp?` · ${_esp} ⏳`:``}</div></div>
     <div class="k"><div class="kl">Tasa rechazo</div><div class="kv c4">${tasaRech}%</div><div class="kf">${rech} rechazos</div></div>
   </div>
 </div></div>
@@ -2107,7 +2127,7 @@ tr:last-child td{border:none}
     </tbody></table></div>
   </section>
   <section><div class="verdict"><h3>Lectura ejecutiva</h3>
-    <p>De <b>${total} leads</b> trabajados, <b>${viab}</b> resultaron viables (${total?Math.round(viab/total*100):0}%) y se cerraron <b>${vent} ventas</b>, una conversión del <b>${conv}%</b> sobre viables. La base registró <b>${rech} rechazos</b> (${tasaRech}% del total contactado)${tasaRech>40?', una tasa alta que sugiere depurar la segmentación de las próximas bases.':tasaRech>0?', dentro de un rango manejable.':'.'} ${enProceso>0?`Hay <b>${enProceso} leads activos en pipeline</b> con potencial de cierre en los próximos días.`:''}</p>
+    <p>De <b>${total} leads</b> trabajados, <b>${viab}</b> resultaron viables (${total?Math.round(viab/total*100):0}%) y se cerraron <b>${vent} ventas</b>, una conversión del <b>${conv}%</b> sobre ${_viabV} viables vendibles${(_madur||_esp)?` (fuera del cálculo: ${_madur} madurando 🎂 y ${_esp} esperando corte ⏳)`:``}. La base registró <b>${rech} rechazos</b> (${tasaRech}% del total contactado)${tasaRech>40?', una tasa alta que sugiere depurar la segmentación de las próximas bases.':tasaRech>0?', dentro de un rango manejable.':'.'} ${enProceso>0?`Hay <b>${enProceso} leads activos en pipeline</b> con potencial de cierre en los próximos días.`:''}</p>
   </div></section>
   <div class="foot">Generado automáticamente desde el CRM · ExpertCell © ${new Date().getFullYear()}</div>
 </div>
