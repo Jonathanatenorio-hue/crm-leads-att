@@ -2143,8 +2143,17 @@ async function depurarLanzamiento(){
       const lote=nums.slice(i,i+900);
       const {data,error}=await db.rpc('depurar_base',{nums:lote});
       if(error)throw error;
-      if((data||[]).length!==lote.length)throw new Error(`Respuesta incompleta del candado (${(data||[]).length}/${lote.length}). Reintenta la depuración.`);
-      res=res.concat(data||[]);
+      // Un número puede tener varios veredictos (p. ej. enviado en 2 campañas):
+      // nos quedamos con el más restrictivo por teléfono.
+      const SEV={LEAD_ACTIVO:3,RECHAZADO_PREVIO:2,YA_ENVIADO:1,LIMPIO:0};
+      const mapa={};
+      (data||[]).forEach(r=>{
+        const t=r.telefono;
+        if(!(t in mapa)||(SEV[r.estatus]||0)>(SEV[mapa[t].estatus]||0))mapa[t]=r;
+      });
+      const faltantes=lote.filter(t=>!(t in mapa));
+      if(faltantes.length)throw new Error(`El candado no respondió por ${faltantes.length} números (ej. ${faltantes[0]}). Reintenta la depuración.`);
+      res=res.concat(lote.map(t=>mapa[t]));
     }
   }catch(e){btn.disabled=false;btn.textContent='Depurar base';return toast('Error al depurar: '+e.message,false);}
   btn.disabled=false;btn.textContent='Depurar base';
@@ -2193,6 +2202,8 @@ async function registrarLanzamiento(){
   btn.disabled=false;btn.innerHTML='🚀 Registrar lanzamiento';
   $('lanzRegResultado').innerHTML='<div class="viab-banner vi">✅ Campaña <b>'+nombre+'</b> registrada: '+agregados+' números agregados a la base'+(existian?' ('+existian+' ya existían)':'')+'. Sube la lista limpia a iVentas y actualiza los mensajes enviados en Gestionar campañas.</div>';
   toast('Lanzamiento registrado');
+  lanzLimpios=null;$('lanzNombre').value='';$('lanzFecha').value='';
+  $('fileLanz').value='';$('lanzResumen').innerHTML='<div class="dash-empty">✅ Lanzamiento registrado. Para otro lanzamiento, depura una base nueva.</div>';
   await cargarCampanas();await cargarSelectsAsignar();
 }
 
