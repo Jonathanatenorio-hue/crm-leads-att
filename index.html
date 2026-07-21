@@ -1707,7 +1707,8 @@ async function renderDashboard(){
     ${asistenteHTML()}
     <div class="kpis6">
       <div class="kpi kpi-pro p1"><div class="kl">Leads</div><div class="kv" data-cu="${total}">0</div><div class="kf">en el sistema</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">Viables</div><div class="kv c" data-cu="${viab}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% del total</div></div>
+      <div class="kpi kpi-pro p2"><div class="kl">Viables (vendibles)</div><div class="kv c" data-cu="${viabVend}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% viable del total</div></div>
+      <div class="kpi kpi-pro p2"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">interesados sin cumplir año</div></div>
       <div class="kpi kpi-pro p3"><div class="kl">Ventas</div><div class="kv g" data-cu="${vent}">0</div><div class="kf">cerradas</div></div>
       <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂 madurando':''}</div></div>
       <div class="kpi kpi-pro p5"><div class="kl">Rechazos</div><div class="kv r" data-cu="${rech}">0</div><div class="kf">fuera de cartera</div></div>
