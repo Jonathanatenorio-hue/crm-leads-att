@@ -312,6 +312,7 @@ tbody tr:hover{background:#F7F8FF}
     <div class="toolbar">
       <div class="search"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" type="text" placeholder="Buscar por teléfono o nombre…"></div>
       <div class="selectwrap"><select id="filterEstado">
+        <option value="__vender__">🎯 Para vender (sin caídos ni no viables)</option>
         <option value="">Todos los estados</option><option value="sin">Sin evaluar</option>
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
@@ -637,6 +638,44 @@ async function cargarHistorial(leadId){
   const nl=$('notasList');
   nl.innerHTML=(notas&&notas.length)?notas.map(n=>`<div class="nota"><div class="nt">${(n.nota||'').replace(/</g,'&lt;')}</div><div class="nf">${new Date(n.creado_en).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div></div>`).join(''):'<div class="dash-empty">Sin notas todavía.</div>';
 }
+// Detecta una fecha en español dentro del texto de una nota
+function fechaDesdeTexto(txt){
+  const t=(txt||'').toLowerCase();
+  const hoy=new Date();hoy.setHours(0,0,0,0);
+  const iso=d=>isoLocal(d);
+  const MESES={enero:0,febrero:1,marzo:2,abril:3,mayo:4,junio:5,julio:6,agosto:7,septiembre:8,setiembre:8,octubre:9,noviembre:10,diciembre:11};
+  let m;
+  // "30 de julio" / "1 de agosto de 2026"
+  if(m=t.match(/\b(\d{1,2})\s+de\s+([a-záéíóú]+)(?:\s+de\s+(\d{4}))?/)){
+    const mes=MESES[m[2].normalize('NFD').replace(/[\u0300-\u036f]/g,'')]??MESES[m[2]];
+    if(mes!==undefined){
+      let y=m[3]?parseInt(m[3]):hoy.getFullYear();
+      let f=new Date(y,mes,parseInt(m[1]));
+      if(!m[3]&&f<hoy)f=new Date(y+1,mes,parseInt(m[1]));
+      return iso(f);
+    }
+  }
+  // 30/07 ó 30/07/2026 ó 30-07
+  if(m=t.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/)){
+    const d=parseInt(m[1]),mo=parseInt(m[2])-1;
+    if(d>=1&&d<=31&&mo>=0&&mo<=11){
+      let y=m[3]?(m[3].length===2?2000+parseInt(m[3]):parseInt(m[3])):hoy.getFullYear();
+      let f=new Date(y,mo,d);
+      if(!m[3]&&f<hoy)f=new Date(y+1,mo,d);
+      return iso(f);
+    }
+  }
+  if(/\bpasado\s*ma[nñ]ana\b/.test(t)){const f=new Date(hoy);f.setDate(f.getDate()+2);return iso(f);}
+  if(/\bma[nñ]ana\b/.test(t)){const f=new Date(hoy);f.setDate(f.getDate()+1);return iso(f);}
+  if(/\bfin\s+de\s+mes\b/.test(t)){return iso(new Date(hoy.getFullYear(),hoy.getMonth()+1,0));}
+  if(/\bfin\s+de\s+semana\b|\bs[aá]bado\b/.test(t)){const f=new Date(hoy);f.setDate(f.getDate()+((6-f.getDay()+7)%7||7));return iso(f);}
+  const DIAS={lunes:1,martes:2,miercoles:3,'miércoles':3,jueves:4,viernes:5,domingo:0};
+  for(const[dn,dd]of Object.entries(DIAS)){
+    if(new RegExp('\\b(el\\s+)?'+dn+'\\b').test(t)){const f=new Date(hoy);f.setDate(f.getDate()+(((dd-f.getDay())%7+7)%7||7));return iso(f);}
+  }
+  if(/\bpr[oó]xima\s+semana\b/.test(t)){const f=new Date(hoy);f.setDate(f.getDate()+7);return iso(f);}
+  return null;
+}
 async function agregarNota(){
   const txt=$('notaTxt').value.trim(); if(!txt||!editId)return;
   const b=$('notaAdd');b.disabled=true;b.innerHTML='<span class="loader"></span>';
@@ -644,7 +683,17 @@ async function agregarNota(){
   b.disabled=false;b.textContent='Agregar';
   if(error){toast('Error al guardar nota',false);return;}
   $('notaTxt').value=''; cargarHistorial(editId); toast('Nota agregada');
-  const li=LEADS.find(l=>l.id===editId);if(li){li._nota=txt;render();}
+  const li=LEADS.find(l=>l.id===editId);if(li){li._nota=txt;li._notaFecha=new Date().toISOString();}
+  // 🤖 Asistente: ¿la nota trae una fecha? → ofrecer programar el recordatorio
+  const fDet=fechaDesdeTexto(txt);
+  if(fDet&&li&&!['Venta exitosa','Lead caído'].includes(li.etapa||'')&&fDet!==li.proximo_contacto){
+    const bonita=fechaLarga(new Date(fDet+'T12:00:00'));
+    if(confirm('🤖 Detecté una fecha en tu nota:\n\n📅 '+bonita+'\n\n¿Programo el recordatorio de contacto para ese día? Te aparecerá en tus pendientes hasta que cierres el lead.')){
+      const {error:e2}=await db.from('leads').update({proximo_contacto:fDet,proximo_contacto_nota:txt.slice(0,90)}).eq('id',editId);
+      if(!e2){li.proximo_contacto=fDet;li.proximo_contacto_nota=txt.slice(0,90);$('pcFecha').value=fDet;$('pcNota').value=txt.slice(0,90);toast('📅 Recordatorio programado para el '+fechaCorta(fDet));}
+    }
+  }
+  render();
 }
 
 const ETAPAS=[
@@ -695,6 +744,12 @@ async function entrarApp(session){
     }
   }
   hide($('boot'));hide($('login'));show($('app'));
+  try{
+    const sg=localStorage.getItem('crm_sort');
+    if(sg)$('sortLeads').value=sg;
+    else if(AGENTE.rol==='agente')$('sortLeads').value='pendiente';
+    if(AGENTE.rol==='agente'&&!localStorage.getItem('crm_filtro_touch')){$('filterEstado').value='__vender__';localStorage.setItem('crm_filtro_touch','1');}
+  }catch(e){}
   await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads(),cargarConfig()]);
   if(AGENTE.rol==='agente')cargarSupMap().then(()=>renderPendientes()).catch(()=>{});
   iniciarAlertasCaidos();
@@ -927,6 +982,7 @@ function render(){
   const etF=$('filterEtapa')?$('filterEtapa').value:'';
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
+    if(est==='__vender__'&&!(l.viabilidad==='VIABLE'&&l.etapa!=='Lead caído'))return false;
     if(est==='sin'&&l.viabilidad)return false;
     if(est==='VIABLE'&&l.viabilidad!=='VIABLE')return false;
     if(est==='NO VIABLE'&&l.viabilidad!=='NO VIABLE')return false;
@@ -972,7 +1028,10 @@ function render(){
     const anChip=_fc?' <span class="badge" style="font-size:10px;padding:2px 7px;'+(isoLocal(_fc)<=_hoyIso?'background:#EDE9FE;color:#6D28D9;font-weight:800':'background:#F3F4F6;color:#475569')+'" title="Fecha efectiva: '+(l.fecha_efectiva||'')+'">🎂 '+(isoLocal(_fc)<=_hoyIso?'¡Cumplió!':fechaCorta(_fc))+'</span>':'';
     const lzChip=l.etapa==='En espera de lanzamiento'?' <span class="badge" style="font-size:10px;padding:2px 7px;background:#ECFEFF;color:#155E75" title="'+String(l.lanz_equipo||'').replace(/"/g,'&quot;')+'">📱 '+(CFG.fecha_lanzamiento?fechaCorta(CFG.fecha_lanzamiento):'')+'</span>':'';
     const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===_hoyIso)||diaLocal(l.ultimo_movimiento)===_hoyIso;
-    const segChip=segHoy&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Con nota o movimiento de hoy">✓ hoy</span>':'';
+    const _refG=Math.max(l._notaFecha?new Date(l._notaFecha).getTime():0,l.ultimo_movimiento?new Date(l.ultimo_movimiento).getTime():0);
+    const segChip=(_refG&&!['Venta exitosa','Lead caído'].includes(l.etapa||''))?(segHoy
+      ?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Gestionado hoy">✓ hoy</span>'
+      :' <span class="badge" style="background:#F3F4F6;color:#6B7280;font-size:10px;padding:2px 7px" title="Última gestión">✓ '+fechaCorta(new Date(_refG))+'</span>'):'';
     const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+anChip+lzChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
@@ -4117,7 +4176,7 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',()=>{ACEL_SUB=null;render();});$('sortLeads').addEventListener('change',render);
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',()=>{ACEL_SUB=null;render();});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
