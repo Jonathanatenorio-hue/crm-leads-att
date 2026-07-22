@@ -484,6 +484,10 @@ tbody tr:hover{background:#F7F8FF}
       <div class="etapa-grid" id="etapaGrid"></div>
 
       <!-- campos condicionales -->
+      <div class="cond hidden" id="f-lanzam">
+        <div class="field"><label>¿Qué equipo quiere apartar? (obligatorio)</label><input type="text" id="lzEquipo" placeholder="Ej. iPhone 18 Pro Max 256GB"></div>
+        <div class="hint" id="lzInfo" style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:10px;padding:8px 12px"></div>
+      </div>
       <div class="cond hidden" id="f-sinano">
         <div class="field"><label>Fecha efectiva de su plan actual (obligatoria)</label><input type="date" id="snFecha"></div>
         <div class="hint hidden" id="snCalc" style="background:#F5F3FF;border:1px solid #DDD6FE;border-radius:10px;padding:8px 12px"><span id="snCumple"></span></div>
@@ -643,6 +647,7 @@ const ETAPAS=[
   {v:'Inicio de negociación',d:'Primer contacto en curso'},
   {v:'Adeudo mensualidad',d:'Solo debe su factura del mes'},
   {v:'Interesado (sin cumplir año)',d:'Le interesa; su plan aún no cumple el año'},
+  {v:'En espera de lanzamiento',d:'Quiere apartar el equipo nuevo'},
   {v:'Cotización enviada',d:'Sugerida al inicio'},
   {v:'Aceleración pendiente',d:'Aún no se puede subir'},
   {v:'Falta INE o biométrico',d:'Esperando documento'},
@@ -686,7 +691,7 @@ async function entrarApp(session){
     }
   }
   hide($('boot'));hide($('login'));show($('app'));
-  await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads()]);
+  await Promise.all([cargarCampanas(),cargarMotivos(),cargarLeads(),cargarConfig()]);
   if(AGENTE.rol==='agente')cargarSupMap().then(()=>renderPendientes()).catch(()=>{});
   iniciarAlertasCaidos();
   if(['director','depurador'].includes(AGENTE.rol)) await cargarSelectsAsignar();
@@ -868,10 +873,12 @@ function renderPendientes(){
     .sort((a,b)=>(a.proximo_contacto<b.proximo_contacto?-1:1));
   const cumpleIso=l=>{const f=fechaCumpleAno(l.fecha_efectiva);return f?isoLocal(f):null;};
   const manIso=(()=>{const d=new Date();d.setDate(d.getDate()+1);return isoLocal(d);})();
+  const lanzProx=(CFG.fecha_lanzamiento&&CFG.fecha_lanzamiento<=manIso)?vivos.filter(l=>l.etapa==='En espera de lanzamiento'):[];
   const anProx=vivos.filter(l=>l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)<=manIso)
     .sort((a,b)=>(cumpleIso(a)<cumpleIso(b)?-1:1));
   const sinMov=vivos.filter(l=>l.etapa&&!(l.etapa==='Aceleración pendiente'&&!acelSubibleHoy(l))
       &&!(l.etapa==='Interesado (sin cumplir año)'&&cumpleIso(l)&&cumpleIso(l)>manIso)
+      &&!enEsperaLanz(l)
       &&(ahora-refMov(l))>864e5
       &&!(l.proximo_contacto&&l.proximo_contacto>hoyIso))
     .sort((a,b)=>refMov(a)-refMov(b));
@@ -886,12 +893,13 @@ function renderPendientes(){
       📉 Llevas <b>${caidos14.length} leads caídos</b> en 2 semanas — motivo principal: <b>${top[0]}</b> (${top[1]}).
       Acércate con <b>${sup}</b> para trabajar juntos esa objeción. 💪</div>`;
   }
-  if(!anProx.length&&!prog.length&&!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
+  if(!lanzProx.length&&!anProx.length&&!prog.length&&!acelListas.length&&!acelEspera.length&&!sinMov.length&&!sinContacto.length&&!coaching){P.innerHTML='';return;}
   const chip=l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid var(--line);background:var(--card,#fff);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`;
   const lista=(arr,max=8)=>arr.slice(0,max).map(chip).join(' ')+(arr.length>max?` <span class="muted-cell" style="font-size:11px">+${arr.length-max} más</span>`:'');
   const horas=l=>Math.round((ahora-refMov(l))/36e5);
   P.innerHTML=`<div class="dash-card" style="margin-bottom:16px">
     <h3>🔔 Tus pendientes de hoy</h3>
+    ${lanzProx.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#0E7490">📱 ¡Preventa de ${CFG.nombre_lanzamiento||'lanzamiento'} ${CFG.fecha_lanzamiento<=hoyIso?'HOY':'MAÑANA'}! Contacta a tus apartados (${lanzProx.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lanzProx.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" title="${(l.lanz_equipo||'').replace(/"/g,'&quot;')}" style="border:1px solid #A5F3FC;background:#ECFEFF;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.lanz_equipo?' · '+String(l.lanz_equipo).slice(0,18):''}</button>`).join(' ')}${lanzProx.length>10?` <span class="muted-cell" style="font-size:11px">+${lanzProx.length-10} más</span>`:''}</div></div>`:''}
     ${anProx.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#7C3AED">🎂 Cumplen su año HOY o MAÑANA — retipifícalos y véndeles (${anProx.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${anProx.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" style="border:1px solid #DDD6FE;background:#F5F3FF;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.nombre?' · '+String(l.nombre).split(' ')[0]:''}</button>`).join(' ')}${anProx.length>10?` <span class="muted-cell" style="font-size:11px">+${anProx.length-10} más</span>`:''}</div></div>`:''}
     ${prog.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#047857">📅 Contactos programados para hoy${prog.some(l=>l.proximo_contacto<hoyIso)?' (incluye vencidos)':''} (${prog.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${prog.slice(0,10).map(l=>`<button class="pendChip" data-id="${l.id}" title="${(l.proximo_contacto_nota||'').replace(/"/g,'&quot;')}" style="border:1px solid ${l.proximo_contacto<hoyIso?'#FECACA;background:#FEF2F2':'#A7F3D0;background:#ECFDF5'};border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">${l.telefono}${l.proximo_contacto<hoyIso?' · vencido '+fechaCorta(l.proximo_contacto):''}</button>`).join(' ')}${prog.length>10?` <span class="muted-cell" style="font-size:11px">+${prog.length-10} más</span>`:''}</div></div>`:''}
     ${acelListas.length?`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px;color:#B45309">🚀 Aceleraciones LISTAS para subir hoy (${acelListas.length}) — ¡véndelas ya!</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${lista(acelListas,12)}</div></div>`:''}
@@ -939,9 +947,10 @@ function render(){
   const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
   const madur=LEADS.filter(l=>enMaduracion(l)).length;
   const esper=LEADS.filter(l=>enEsperaAcel(l)).length;
-  const viabVend=viab-madur-esper;
+  const lanzN=LEADS.filter(l=>enEsperaLanz(l)).length;
+  const viabVend=viab-madur-esper-lanzN;
   $('kLeads').textContent=LEADS.length;$('kViab').textContent=viabVend;
-  $('kViabPct').textContent=(LEADS.length?Math.round(viab/LEADS.length*100)+'% viable':'—')+(madur?' · '+madur+' 🎂':'')+(esper?' · '+esper+' ⏳':'');
+  $('kViabPct').textContent=(LEADS.length?Math.round(viab/LEADS.length*100)+'% viable':'—')+(madur?' · '+madur+' 🎂':'')+(esper?' · '+esper+' ⏳':'')+(lanzN?' · '+lanzN+' 📱':'');
   $('kVentas').textContent=vent;$('kConv').textContent=viabVend>0?Math.round(vent/viabVend*100)+'%':'—';
   const _kcf=$('kConvFoot');if(_kcf)_kcf.textContent='sobre vendibles';
   const tb=$('tbody');tb.innerHTML='';
@@ -957,9 +966,10 @@ function render(){
       ' <span class="badge" style="font-size:10px;padding:2px 7px;'+(l.proximo_contacto<_hoyIso?'background:#FEE2E2;color:#991B1B':(l.proximo_contacto===_hoyIso?'background:#D1FAE5;color:#065F46':'background:#F3F4F6;color:#475569'))+'" title="'+String(l.proximo_contacto_nota||'Próximo contacto').replace(/"/g,'&quot;')+'">📅 '+(l.proximo_contacto===_hoyIso?'HOY':fechaCorta(l.proximo_contacto))+'</span>':'';
     const _fc=l.etapa==='Interesado (sin cumplir año)'?fechaCumpleAno(l.fecha_efectiva):null;
     const anChip=_fc?' <span class="badge" style="font-size:10px;padding:2px 7px;'+(isoLocal(_fc)<=_hoyIso?'background:#EDE9FE;color:#6D28D9;font-weight:800':'background:#F3F4F6;color:#475569')+'" title="Fecha efectiva: '+(l.fecha_efectiva||'')+'">🎂 '+(isoLocal(_fc)<=_hoyIso?'¡Cumplió!':fechaCorta(_fc))+'</span>':'';
+    const lzChip=l.etapa==='En espera de lanzamiento'?' <span class="badge" style="font-size:10px;padding:2px 7px;background:#ECFEFF;color:#155E75" title="'+String(l.lanz_equipo||'').replace(/"/g,'&quot;')+'">📱 '+(CFG.fecha_lanzamiento?fechaCorta(CFG.fecha_lanzamiento):'')+'</span>':'';
     const segHoy=(l._notaFecha&&diaLocal(l._notaFecha)===_hoyIso)||diaLocal(l.ultimo_movimiento)===_hoyIso;
     const segChip=segHoy&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Con nota o movimiento de hoy">✓ hoy</span>':'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+anChip;
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+anChip+lzChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
@@ -1005,8 +1015,8 @@ function setEtapasPermitidas(lista){
   });
 }
 function showEtapaFields(){
-  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano'].forEach(x=>hide($(x)));
-  const map={'Aceleración pendiente':'f-acel','Falta INE o biométrico':'f-faltaine','Falta contrato firmado':'f-contrato','Falta pago inicial':'f-pago','Venta exitosa':'f-venta','Lead caído':'f-caido','Adeudo mensualidad':'f-mensualidad','Línea adicional':'f-lineaadic','Interesado (sin cumplir año)':'f-sinano'};
+  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano','f-lanzam'].forEach(x=>hide($(x)));
+  const map={'Aceleración pendiente':'f-acel','Falta INE o biométrico':'f-faltaine','Falta contrato firmado':'f-contrato','Falta pago inicial':'f-pago','Venta exitosa':'f-venta','Lead caído':'f-caido','Adeudo mensualidad':'f-mensualidad','Línea adicional':'f-lineaadic','Interesado (sin cumplir año)':'f-sinano','En espera de lanzamiento':'f-lanzam'};
   if(map[st.etapa])show($(map[st.etapa]));
 }
 
@@ -1035,6 +1045,19 @@ function recalcViab(){
   }
 }
 
+// ===== CONFIG GLOBAL (lanzamientos) =====
+let CFG={};
+async function cargarConfig(){
+  try{const {data}=await db.from('config_crm').select('*');CFG={};(data||[]).forEach(r=>CFG[r.clave]=r.valor);}catch(e){CFG={};}
+  if(!CFG.nombre_lanzamiento)CFG.nombre_lanzamiento='iPhone 18';
+  if(!CFG.fecha_lanzamiento)CFG.fecha_lanzamiento='2026-09-11';
+}
+function enEsperaLanz(l){
+  if(l.etapa!=='En espera de lanzamiento')return false;
+  if(!CFG.fecha_lanzamiento)return false;
+  const man=new Date();man.setDate(man.getDate()+1);
+  return CFG.fecha_lanzamiento>isoLocal(man);   // despierta desde la víspera
+}
 // ===== SIN CUMPLIR AÑO cálculo =====
 function fechaCumpleAno(feStr){
   if(!feStr)return null;
@@ -1105,7 +1128,9 @@ function abrirDrawer(lead){
   ['segAdeudo','segRenovar','segIne','segFaltaQue'].forEach(s=>$(s).querySelectorAll('button').forEach(b=>b.className=''));
   hide($('fMontoAdeudo'));hide($('fNoRenovar'));hide($('secTip'));
   $('etapaGrid').querySelectorAll('.etapa-opt').forEach(x=>x.classList.remove('sel'));
-  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano'].forEach(x=>hide($(x)));
+  ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano','f-lanzam'].forEach(x=>hide($(x)));
+  $('lzEquipo').value='';
+  $('lzInfo').innerHTML='📱 <b>'+(CFG.nombre_lanzamiento||'Lanzamiento')+'</b> · preventa estimada: <b>'+(CFG.fecha_lanzamiento?fechaLarga(new Date(CFG.fecha_lanzamiento+'T12:00:00')):'por definir')+'</b> — el CRM te avisará un día antes para contactarlo.';
   $('snFecha').value='';$('snCalc').classList.add('hidden');
   $('notaIniW').classList.toggle('hidden',!!lead);$('notaIni').value='';
   $('segLinEq').querySelectorAll('button').forEach(b=>b.className='');hide($('lEquipoW'));$('lPlan').value='';$('lEquipo').value='';
@@ -1126,6 +1151,7 @@ function abrirDrawer(lead){
     if(lead.falta_que){st.faltaQue=lead.falta_que;segSet('segFaltaQue',lead.falta_que);}
     $('pcFecha').value=lead.proximo_contacto||'';$('pcNota').value=lead.proximo_contacto_nota||'';
     if(lead.fecha_efectiva){$('snFecha').value=lead.fecha_efectiva;recalcSinAno();}
+    if(lead.lanz_equipo)$('lzEquipo').value=lead.lanz_equipo;
     if(lead.etapa==='Línea adicional'){
       $('lPlan').value=lead.acel_plan||'';
       const eq=lead.acel_equipo==='Sin equipo'?'Sin equipo':(lead.acel_equipo?'Con equipo':null);
@@ -1159,6 +1185,12 @@ async function guardar(){
     if(viable&&!st.etapa)return fail('Selecciona la tipificación.');
     if(!viable&&st.etapa&&!['Adeudo mensualidad','Lead caído'].includes(st.etapa))return fail('Con adeudo solo puedes tipificar Adeudo mensualidad o Lead caído.');
     if(st.etapa==='Adeudo mensualidad'&&st.adeudo!=='Sí')return fail('Para Adeudo mensualidad marca ¿Tiene adeudo? = Sí y captura el monto del mes.');
+    if(st.etapa==='En espera de lanzamiento'){
+      if(!$('lzEquipo').value.trim())return fail('Captura qué equipo quiere apartar — así dirección sabe cuánta demanda hay.');
+      const _man=new Date();_man.setDate(_man.getDate()+1);
+      if(CFG.fecha_lanzamiento&&CFG.fecha_lanzamiento<=isoLocal(_man))return fail('¡La preventa de '+(CFG.nombre_lanzamiento||'el lanzamiento')+' es '+(CFG.fecha_lanzamiento<=isoLocal(new Date())?'HOY':'mañana')+'! Ya no puede esperar: cotízale y véndele.');
+      o.lanz_equipo=$('lzEquipo').value.trim();
+    }
     if(st.etapa==='Interesado (sin cumplir año)'){
       if(!$('snFecha').value)return fail('Captura la fecha efectiva de su plan — de ahí calculamos cuándo cumple el año.');
       const _f=fechaCumpleAno($('snFecha').value);
@@ -1238,11 +1270,12 @@ const KCOLS=[
   {e:'Inicio de negociación',c:'#64748B'},
   {e:'Adeudo mensualidad',c:'#E11D48'},
   {e:'Interesado (sin cumplir año)',c:'#8B5CF6'},
+  {e:'En espera de lanzamiento',c:'#0891B2'},
   {e:'Cotización enviada',c:'#4F46E5'},{e:'Aceleración pendiente',c:'#D97706'},
   {e:'Falta INE o biométrico',c:'#0891B2'},{e:'Falta contrato firmado',c:'#7C3AED'},
   {e:'Falta pago inicial',c:'#DB2777'},{e:'Línea adicional',c:'#0EA5E9'},{e:'Venta exitosa',c:'#16A34A'},{e:'Lead caído',c:'#DC2626'}
 ];
-const REQUIERE_CAMPOS=['Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído','Adeudo mensualidad','Línea adicional','Interesado (sin cumplir año)'];
+const REQUIERE_CAMPOS=['Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Venta exitosa','Lead caído','Adeudo mensualidad','Línea adicional','Interesado (sin cumplir año)','En espera de lanzamiento'];
 
 function setVista(v){
   vista=v;
@@ -1513,8 +1546,8 @@ function resumenCRM(){
   const porAgente={},porDia={},porCamp={},agDia={};
   LEADS.forEach(l=>{
     const ag=l.agentes?.nombre||'—',d=dia(l.creado_en),cp=l.campanas?.nombre||'—';
-    const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,madurando:0,esperando_corte:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
-    A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(enMaduracion(l))A.madurando++;if(enEsperaAcel(l))A.esperando_corte++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
+    const A=porAgente[ag]=porAgente[ag]||{leads:0,viables:0,madurando:0,esperando_corte:0,apartados_lanzamiento:0,ventas:0,caidos:0,sin_tipificar:0,supervisor:SUPMAP?.[ag]||null};
+    A.leads++;if(l.viabilidad==='VIABLE')A.viables++;if(enMaduracion(l))A.madurando++;if(enEsperaAcel(l))A.esperando_corte++;if(enEsperaLanz(l))A.apartados_lanzamiento++;if(l.etapa==='Venta exitosa')A.ventas++;if(l.etapa==='Lead caído')A.caidos++;if(!l.etapa)A.sin_tipificar++;
     const D=porDia[d]=porDia[d]||{leads:0,viables:0,ventas:0};D.leads++;if(l.viabilidad==='VIABLE')D.viables++;
     if(l.etapa==='Venta exitosa'){const dv=dia(l.fecha_venta||l.creado_en);(porDia[dv]=porDia[dv]||{leads:0,viables:0,ventas:0}).ventas++;}
     const C=porCamp[cp]=porCamp[cp]||{leads:0,viables:0,ventas:0,rechazos:0,enviados:0};C.leads++;if(l.viabilidad==='VIABLE')C.viables++;if(l.etapa==='Venta exitosa')C.ventas++;
@@ -1530,7 +1563,7 @@ function resumenCRM(){
   return {fecha_hoy:hoy,total_leads:LEADS.length,total_rechazos:(RECHAZOS||[]).length,
     por_etapa:etapas,por_agente:porAgente,por_agente_etapa:porAgenteEtapa,por_dia_ultimos_30:dias30,
     leads_por_agente_por_dia_ultimos_14:agDia14,por_campana:porCamp,
-    nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; al llegar su fecha vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
+    nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; apartados_lanzamiento=esperando preventa del equipo nuevo; al llegar sus fechas vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
 }
 function informeWhats(){
   const hoyTxt=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
@@ -1545,6 +1578,7 @@ function informeWhats(){
     if(l.viabilidad!=='VIABLE')return;           // solo cartera viva: viables sin cerrar ni caer
     if(enMaduracion(l))return;                   // 🎂 hibernando: no cuentan hasta la víspera
     if(enEsperaAcel(l))return;                   // ⏳ aceleración esperando corte: fuera de la cartera del día
+    if(enEsperaLanz(l))return;                   // 📱 apartado para lanzamiento: fuera hasta la víspera
     o.activos++;
     const e=l.etapa||'Sin tipificar';o.et[e]=(o.et[e]||0)+1;
   });
@@ -1566,6 +1600,8 @@ function informeWhats(){
   t+='🔥 *'+cerca+' a un paso de cerrar* (pago/contrato/INE/aceleración)\n';
   const espTot=LEADS.filter(l=>enEsperaAcel(l)).length;
   if(espTot)t+='⏳ '+espTot+' aceleraciones esperando su corte (con fecha) — prepáralas: INE + plan\n';
+  const lanzTot=LEADS.filter(l=>enEsperaLanz(l)).length;
+  if(lanzTot)t+='📱 '+lanzTot+' apartados para '+(CFG.nombre_lanzamiento||'el lanzamiento')+'\n';
   if(sinTip)t+='⚠️ '+sinTip+' viables sin tipificar — ¡primer contacto pendiente!\n';
   t+='¡Vamos por un día histórico! 💪';
   navigator.clipboard.writeText(t).then(()=>toast('Informe copiado — pégalo en WhatsApp'),()=>{});
@@ -1688,11 +1724,12 @@ async function renderDashboard(){
   const rech=RECHAZOS.length;
   const madurando=LEADS.filter(l=>enMaduracion(l)).length;
   const espera=LEADS.filter(l=>enEsperaAcel(l)).length;
-  const viabVend=viab-madurando-espera;
+  const espLanz=LEADS.filter(l=>enEsperaLanz(l)).length;
+  const viabVend=viab-madurando-espera-espLanz;
   const conv=viabVend>0?Math.round(vent/viabVend*100):0;
   const tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
-  const ETS=['Inicio de negociación','Adeudo mensualidad','Interesado (sin cumplir año)','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído'];
-  const ECOL={'Inicio de negociación':'#64748B','Adeudo mensualidad':'#E11D48','Interesado (sin cumplir año)':'#8B5CF6','Línea adicional':'#0EA5E9','Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
+  const ETS=['Inicio de negociación','Adeudo mensualidad','Interesado (sin cumplir año)','En espera de lanzamiento','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído'];
+  const ECOL={'Inicio de negociación':'#64748B','Adeudo mensualidad':'#E11D48','Interesado (sin cumplir año)':'#8B5CF6','En espera de lanzamiento':'#0891B2','Línea adicional':'#0EA5E9','Cotización enviada':'#4F46E5','Aceleración pendiente':'#D97706','Falta INE o biométrico':'#0891B2','Falta contrato firmado':'#7C3AED','Falta pago inicial':'#DB2777','Venta exitosa':'#16A34A','Lead caído':'#DC2626'};
   const porEtapa=ETS.map(e=>({e,n:LEADS.filter(l=>l.etapa===e).length}));
   // agentes
   const pa={};LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';(pa[n]=pa[n]||{v:0,vt:0});if(l.viabilidad==='VIABLE')pa[n].v++;if(l.etapa==='Venta exitosa')pa[n].vt++;});
@@ -1725,8 +1762,9 @@ async function renderDashboard(){
       <div class="kpi kpi-pro p2"><div class="kl">Viables (vendibles)</div><div class="kv c" data-cu="${viabVend}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% viable del total</div></div>
       <div class="kpi kpi-pro p2"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">sin cumplir año</div></div>
       <div class="kpi kpi-pro p2"><div class="kl">⏳ Esperando corte</div><div class="kv" style="color:#D97706" data-cu="${espera}">0</div><div class="kf">aceleraciones con fecha futura</div></div>
+      <div class="kpi kpi-pro p2"><div class="kl">📱 Apartados</div><div class="kv" style="color:#0891B2" data-cu="${espLanz}">0</div><div class="kf">esperando ${CFG.nombre_lanzamiento||'lanzamiento'}</div></div>
       <div class="kpi kpi-pro p3"><div class="kl">Ventas</div><div class="kv g" data-cu="${vent}">0</div><div class="kf">cerradas</div></div>
-      <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂':''}${espera?' · '+espera+' ⏳':''}</div></div>
+      <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂':''}${espera?' · '+espera+' ⏳':''}${espLanz?' · '+espLanz+' 📱':''}</div></div>
       <div class="kpi kpi-pro p5"><div class="kl">Rechazos</div><div class="kv r" data-cu="${rech}">0</div><div class="kf">fuera de cartera</div></div>
       <div class="kpi kpi-pro p6"><div class="kl">Tasa rechazo</div><div class="kv a" data-cu="${tasaRech}" data-suf="%">0</div><div class="kf">de la base total</div></div>
     </div>
@@ -1752,6 +1790,15 @@ async function renderDashboard(){
     </div>
     <div class="dash-card" style="margin-bottom:16px"><h3>⚠️ Leads sin movimiento (+24h)</h3><div class="dc-sub">Seguimiento pendiente · ${parados.length} en alerta</div>
       ${parados.length?parados.map(l=>{const h=Math.round((ahora-new Date(l.ultimo_movimiento).getTime())/36e5);return `<div class="alert-row"><div><span class="al-tel">${l.telefono}</span> <span class="al-nom">${l.nombre||''} · ${l.etapa}${ES_STAFF&&l.agentes?.nombre?' · '+l.agentes.nombre:''}</span></div><span class="al-h">${h}h sin mover</span></div>`;}).join(''):'<div class="dash-empty">Todo con seguimiento al día. 🎉</div>'}</div>
+    <div class="dash-card" style="margin-top:16px"><h3>📱 Lanzamiento: ${CFG.nombre_lanzamiento||'—'}</h3>
+      <div class="dc-sub">Preventa estimada: <b>${CFG.fecha_lanzamiento?fechaLarga(new Date(CFG.fecha_lanzamiento+'T12:00:00')):'sin definir'}</b> · apartados: <b>${LEADS.filter(l=>l.etapa==='En espera de lanzamiento').length}</b> — la demanda capturada por los agentes:</div>
+      ${(()=>{const D={};LEADS.filter(l=>l.etapa==='En espera de lanzamiento').forEach(l=>{const e=(l.lanz_equipo||'Sin especificar').trim();D[e]=(D[e]||0)+1;});const ent=Object.entries(D).sort((a,b)=>b[1]-a[1]);return ent.length?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+ent.map(([e,n])=>`<span class="badge" style="background:#ECFEFF;color:#155E75;padding:5px 12px;font-size:12px">${e}: <b>${n}</b></span>`).join('')+'</div>':'<div class="dash-empty" style="font-size:12px;margin-top:8px">Aún no hay apartados — cuando los agentes tipifiquen, aquí verás la demanda por modelo.</div>';})()}
+      ${AGENTE.rol==='director'?`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="lzNombre" placeholder="Nombre (ej. iPhone 18)" value="${CFG.nombre_lanzamiento||''}" style="flex:1;min-width:150px">
+        <input type="date" id="lzFecha" value="${CFG.fecha_lanzamiento||''}">
+        <button class="btn btn-ghost" id="btnLzGuardar" style="white-space:nowrap">Guardar fecha</button>
+      </div>`:''}
+    </div>
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
@@ -1791,6 +1838,17 @@ async function renderDashboard(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
+  const _lz=$('btnLzGuardar');if(_lz)_lz.onclick=async()=>{
+    const n=$('lzNombre').value.trim(),f=$('lzFecha').value;
+    if(!n||!f)return toast('Captura nombre y fecha del lanzamiento',false);
+    try{
+      await db.from('config_crm').upsert({clave:'nombre_lanzamiento',valor:n});
+      await db.from('config_crm').upsert({clave:'fecha_lanzamiento',valor:f});
+      CFG.nombre_lanzamiento=n;CFG.fecha_lanzamiento=f;
+      toast('Lanzamiento actualizado — todos los apartados recalibrados 📱');
+      renderDashboard();
+    }catch(e){toast('Error: '+e.message,false);}
+  };
   const _ba=$('btnArchivarMasa');if(_ba){_ba.onclick=archivarMasivo;$('arcTipo').onchange=previewArchivo;$('arcDias').onchange=previewArchivo;previewArchivo();}
   $('btnInforme').onclick=generarInforme;
   $('tbltabs').querySelectorAll('button').forEach(b=>b.onclick=()=>renderTablas(b.dataset.t));
@@ -1907,19 +1965,20 @@ async function tablaAcel(){
 function tablaAgente(){
   const LEADS=dashLeads();
   const A={};
-  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,mad:0,esp:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
+  LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{leads:0,viab:0,mad:0,esp:0,lanz:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
     a.leads++;
     if(enMaduracion(l))a.mad++;
     if(enEsperaAcel(l))a.esp++;
+    if(enEsperaLanz(l))a.lanz++;
     if(l.viabilidad==='VIABLE')a.viab++;
     else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')a.nvAd++;else a.nvRe++;}
     else a.def++;
     if(l.etapa==='Venta exitosa')a.vent++;
     a.adeudo+=(l.monto_adeudo||0);});
-  const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.mad,o.esp,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,Math.max(o.viab-o.mad-o.esp,0)),money(o.adeudo)]).sort((a,b)=>b[9]-a[9]||b[2]-a[2]);
-  const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.mad+=o.mad;t.esp+=o.esp;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,mad:0,esp:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
-  const totalRow=['TOTAL',T.leads,T.viab,T.mad,T.esp,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,Math.max(T.viab-T.mad-T.esp,0)),money(T.adeudo)];
-  const headers=['Agente','Leads','Viables','🎂 Madurando','⏳ Esp. corte','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv. (vendibles)','Adeudo ($)'];
+  const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.mad,o.esp,o.lanz,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,Math.max(o.viab-o.mad-o.esp-o.lanz,0)),money(o.adeudo)]).sort((a,b)=>b[10]-a[10]||b[2]-a[2]);
+  const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.mad+=o.mad;t.esp+=o.esp;t.lanz+=o.lanz;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,mad:0,esp:0,lanz:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
+  const totalRow=['TOTAL',T.leads,T.viab,T.mad,T.esp,T.lanz,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,Math.max(T.viab-T.mad-T.esp-T.lanz,0)),money(T.adeudo)];
+  const headers=['Agente','Leads','Viables','🎂 Madurando','⏳ Esp. corte','📱 Apartados','NV adeudo','NV renovó','NV total','Por definir','Ventas','% viab.','% conv. (vendibles)','Adeudo ($)'];
   LAST_TABLA={headers,rows:[...rows,totalRow],name:'Resumen_por_agente'};
   return render_atable(headers,rows,totalRow);
 }
@@ -2043,7 +2102,8 @@ async function generarInforme(){
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length, rech=RECHAZOS.length;
   const _madur=LEADS.filter(l=>enMaduracion(l)).length;
   const _esp=LEADS.filter(l=>enEsperaAcel(l)).length;
-  const _viabV=Math.max(viab-_madur-_esp,0);
+  const _lz=LEADS.filter(l=>enEsperaLanz(l)).length;
+  const _viabV=Math.max(viab-_madur-_esp-_lz,0);
   const conv=_viabV>0?Math.round(vent/_viabV*100):0, tasaRech=(total+rech)?Math.round(rech/(total+rech)*100):0;
   const enProceso=LEADS.filter(l=>l.viabilidad==='VIABLE'&&l.etapa&&l.etapa!=='Lead caído').length;
   const pa={};LEADS.forEach(l=>{const n=l.agentes?.nombre||'—';(pa[n]=pa[n]||{v:0,vt:0});if(l.viabilidad==='VIABLE')pa[n].v++;if(l.etapa==='Venta exitosa')pa[n].vt++;});
@@ -2109,7 +2169,7 @@ tr:last-child td{border:none}
     <div class="k"><div class="kl">Viables</div><div class="kv c1">${viab}</div><div class="kf">${total?Math.round(viab/total*100):0}% del total</div></div>
     <div class="k"><div class="kl">En proceso</div><div class="kv c5">${enProceso}</div><div class="kf">en pipeline</div></div>
     <div class="k"><div class="kl">Ventas</div><div class="kv c2">${vent}</div><div class="kf">cerradas</div></div>
-    <div class="k"><div class="kl">Conversión</div><div class="kv c3">${conv}%</div><div class="kf">sobre ${_viabV} vendibles${_madur?` · ${_madur} 🎂`:``}${_esp?` · ${_esp} ⏳`:``}</div></div>
+    <div class="k"><div class="kl">Conversión</div><div class="kv c3">${conv}%</div><div class="kf">sobre ${_viabV} vendibles${_madur?` · ${_madur} 🎂`:``}${_esp?` · ${_esp} ⏳`:``}${_lz?` · ${_lz} 📱`:``}</div></div>
     <div class="k"><div class="kl">Tasa rechazo</div><div class="kv c4">${tasaRech}%</div><div class="kf">${rech} rechazos</div></div>
   </div>
 </div></div>
