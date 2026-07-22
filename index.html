@@ -485,7 +485,10 @@ tbody tr:hover{background:#F7F8FF}
 
       <!-- campos condicionales -->
       <div class="cond hidden" id="f-lanzam">
-        <div class="field"><label>¿Qué equipo quiere apartar? (obligatorio)</label><input type="text" id="lzEquipo" placeholder="Ej. iPhone 18 Pro Max 256GB"></div>
+        <div class="row2">
+          <div class="field"><label>Modelo que quiere apartar (obligatorio)</label><select id="lzEquipoSel"></select></div>
+          <div class="field hidden" id="lzOtroW"><label>Especifica el equipo</label><input type="text" id="lzEquipo" placeholder="Ej. iPhone 18e 512GB"></div>
+        </div>
         <div class="hint" id="lzInfo" style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:10px;padding:8px 12px"></div>
       </div>
       <div class="cond hidden" id="f-sinano">
@@ -1051,6 +1054,18 @@ async function cargarConfig(){
   try{const {data}=await db.from('config_crm').select('*');CFG={};(data||[]).forEach(r=>CFG[r.clave]=r.valor);}catch(e){CFG={};}
   if(!CFG.nombre_lanzamiento)CFG.nombre_lanzamiento='iPhone 18';
   if(!CFG.fecha_lanzamiento)CFG.fecha_lanzamiento='2026-09-11';
+  if(!CFG.modelos_lanzamiento)CFG.modelos_lanzamiento='iPhone 18, iPhone 18 Plus, iPhone 18 Pro, iPhone 18 Pro Max';
+}
+function llenarModelosLanz(sel, actual){
+  const modelos=(CFG.modelos_lanzamiento||'').split(',').map(m=>m.trim()).filter(Boolean);
+  sel.innerHTML='<option value="">— Elige el modelo —</option>'+
+    modelos.map(m=>`<option value="${m.replace(/"/g,'&quot;')}">${m}</option>`).join('')+
+    '<option value="__otro__">Otro…</option>';
+  if(actual){
+    if(modelos.includes(actual))sel.value=actual;
+    else{sel.value='__otro__';return actual;}   // regresa el texto para el campo Otro
+  }
+  return null;
 }
 function enEsperaLanz(l){
   if(l.etapa!=='En espera de lanzamiento')return false;
@@ -1129,7 +1144,8 @@ function abrirDrawer(lead){
   hide($('fMontoAdeudo'));hide($('fNoRenovar'));hide($('secTip'));
   $('etapaGrid').querySelectorAll('.etapa-opt').forEach(x=>x.classList.remove('sel'));
   ['f-acel','f-faltaine','f-contrato','f-pago','f-venta','f-caido','f-mensualidad','f-lineaadic','f-sinano','f-lanzam'].forEach(x=>hide($(x)));
-  $('lzEquipo').value='';
+  $('lzEquipo').value='';hide($('lzOtroW'));
+  llenarModelosLanz($('lzEquipoSel'),null);
   $('lzInfo').innerHTML='📱 <b>'+(CFG.nombre_lanzamiento||'Lanzamiento')+'</b> · preventa estimada: <b>'+(CFG.fecha_lanzamiento?fechaLarga(new Date(CFG.fecha_lanzamiento+'T12:00:00')):'por definir')+'</b> — el CRM te avisará un día antes para contactarlo.';
   $('snFecha').value='';$('snCalc').classList.add('hidden');
   $('notaIniW').classList.toggle('hidden',!!lead);$('notaIni').value='';
@@ -1151,7 +1167,10 @@ function abrirDrawer(lead){
     if(lead.falta_que){st.faltaQue=lead.falta_que;segSet('segFaltaQue',lead.falta_que);}
     $('pcFecha').value=lead.proximo_contacto||'';$('pcNota').value=lead.proximo_contacto_nota||'';
     if(lead.fecha_efectiva){$('snFecha').value=lead.fecha_efectiva;recalcSinAno();}
-    if(lead.lanz_equipo)$('lzEquipo').value=lead.lanz_equipo;
+    if(lead.lanz_equipo){
+      const otro=llenarModelosLanz($('lzEquipoSel'),lead.lanz_equipo);
+      if(otro){$('lzEquipo').value=otro;show($('lzOtroW'));}
+    }
     if(lead.etapa==='Línea adicional'){
       $('lPlan').value=lead.acel_plan||'';
       const eq=lead.acel_equipo==='Sin equipo'?'Sin equipo':(lead.acel_equipo?'Con equipo':null);
@@ -1186,10 +1205,12 @@ async function guardar(){
     if(!viable&&st.etapa&&!['Adeudo mensualidad','Lead caído'].includes(st.etapa))return fail('Con adeudo solo puedes tipificar Adeudo mensualidad o Lead caído.');
     if(st.etapa==='Adeudo mensualidad'&&st.adeudo!=='Sí')return fail('Para Adeudo mensualidad marca ¿Tiene adeudo? = Sí y captura el monto del mes.');
     if(st.etapa==='En espera de lanzamiento'){
-      if(!$('lzEquipo').value.trim())return fail('Captura qué equipo quiere apartar — así dirección sabe cuánta demanda hay.');
+      const _selV=$('lzEquipoSel').value;
+      const _eqFinal=_selV==='__otro__'?$('lzEquipo').value.trim():_selV;
+      if(!_eqFinal)return fail('Elige el modelo que quiere apartar — así dirección sabe cuánta demanda hay.');
       const _man=new Date();_man.setDate(_man.getDate()+1);
       if(CFG.fecha_lanzamiento&&CFG.fecha_lanzamiento<=isoLocal(_man))return fail('¡La preventa de '+(CFG.nombre_lanzamiento||'el lanzamiento')+' es '+(CFG.fecha_lanzamiento<=isoLocal(new Date())?'HOY':'mañana')+'! Ya no puede esperar: cotízale y véndele.');
-      o.lanz_equipo=$('lzEquipo').value.trim();
+      o.lanz_equipo=_eqFinal;
     }
     if(st.etapa==='Interesado (sin cumplir año)'){
       if(!$('snFecha').value)return fail('Captura la fecha efectiva de su plan — de ahí calculamos cuándo cumple el año.');
@@ -1796,8 +1817,9 @@ async function renderDashboard(){
       ${AGENTE.rol==='director'?`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
         <input type="text" id="lzNombre" placeholder="Nombre (ej. iPhone 18)" value="${CFG.nombre_lanzamiento||''}" style="flex:1;min-width:150px">
         <input type="date" id="lzFecha" value="${CFG.fecha_lanzamiento||''}">
-        <button class="btn btn-ghost" id="btnLzGuardar" style="white-space:nowrap">Guardar fecha</button>
-      </div>`:''}
+        <button class="btn btn-ghost" id="btnLzGuardar" style="white-space:nowrap">Guardar</button>
+      </div>
+      <div style="margin-top:8px"><input type="text" id="lzModelos" value="${(CFG.modelos_lanzamiento||'').replace(/"/g,'&quot;')}" placeholder="Modelos separados por coma" style="width:100%"><div class="hint" style="font-size:11.5px;margin-top:4px">Los modelos que los agentes verán en la lista, separados por coma. Agrega capacidades si quieres medirlas (ej. "iPhone 18 Pro Max 256GB, iPhone 18 Pro Max 512GB").</div></div>`:''}
     </div>
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
@@ -1844,6 +1866,8 @@ async function renderDashboard(){
     try{
       await db.from('config_crm').upsert({clave:'nombre_lanzamiento',valor:n});
       await db.from('config_crm').upsert({clave:'fecha_lanzamiento',valor:f});
+      const mods=$('lzModelos')?$('lzModelos').value.trim():'';
+      if(mods){await db.from('config_crm').upsert({clave:'modelos_lanzamiento',valor:mods});CFG.modelos_lanzamiento=mods;}
       CFG.nombre_lanzamiento=n;CFG.fecha_lanzamiento=f;
       toast('Lanzamiento actualizado — todos los apartados recalibrados 📱');
       renderDashboard();
@@ -4072,6 +4096,7 @@ bindSeg('segIne',v=>{st.ine=v;$('aIneFile').classList.toggle('hidden',v!=='Sí')
 bindSeg('segFaltaQue',v=>{st.faltaQue=v;});
 bindSeg('segLinEq',v=>{st.linEq=v;$('lEquipoW').classList.toggle('hidden',v!=='Con equipo');});
 $('snFecha').addEventListener('input',recalcSinAno);
+$('lzEquipoSel').addEventListener('change',()=>{$('lzOtroW').classList.toggle('hidden',$('lzEquipoSel').value!=='__otro__');});
 $('dPrepago').addEventListener('change',recalcViab);
 $('aUltimaCuota').addEventListener('change',recalcAcel);$('aDiaCorte').addEventListener('input',recalcAcel);
 $('aEquipo').addEventListener('input',e=>{$('aAppsField').classList.toggle('hidden',!e.target.value.trim());});
