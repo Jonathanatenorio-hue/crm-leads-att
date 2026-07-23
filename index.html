@@ -318,7 +318,13 @@ tbody tr:hover{background:#F7F8FF}
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
       </select></div>
       <div class="selectwrap"><select id="sortLeads"><option value="reciente">Más recientes primero</option><option value="pendiente">⏳ Seguimiento pendiente primero</option><option value="seguido">✓ Seguidos hoy primero</option></select></div>
-      <div class="selectwrap"><select id="filterEtapa"><option value="">Todas las etapas</option><option value="__ventahoy__">💰 Vendidos HOY</option><option value="__sin__">Sin tipificar</option></select></div>
+      <div class="selectwrap" id="etWrap" style="position:relative">
+        <button class="btn btn-ghost" id="etBtn" style="white-space:nowrap;border:1.5px solid var(--line)">Todas las etapas ▾</button>
+        <div id="etPanel" class="hidden" style="position:absolute;top:44px;left:0;z-index:90;background:var(--surface,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.15);padding:10px 12px;min-width:250px;max-height:340px;overflow:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12px">Etapas (elige una o varias)</b><button class="btn btn-ghost" id="etLimpiar" style="font-size:11px;padding:2px 8px">Limpiar</button></div>
+          <div id="etOpciones" style="display:flex;flex-direction:column;gap:2px;font-size:13px"></div>
+        </div>
+      </div>
       <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
         <button data-v="tabla" class="on">▤ Tabla</button>
@@ -970,16 +976,30 @@ function renderPendientes(){
   P.querySelectorAll('.pendChip').forEach(b=>b.onclick=()=>{const l=LEADS.find(x=>String(x.id)===b.dataset.id);if(l)abrirDrawer(l);});
 }
 // ===== RENDER TABLA =====
+function etSeleccion(){
+  return new Set([...document.querySelectorAll('.etChk:checked')].map(c=>c.value));
+}
+function etEtiqueta(){
+  const s=etSeleccion(),b=$('etBtn');if(!b)return;
+  const nombres={__ventahoy__:'💰 Vendidos HOY',__sin__:'Sin tipificar'};
+  if(!s.size)b.textContent='Todas las etapas ▾';
+  else if(s.size===1){const v=[...s][0];b.textContent=(nombres[v]||v)+' ▾';}
+  else b.textContent=s.size+' etapas ▾';
+}
+function etSoltar(valores){
+  document.querySelectorAll('.etChk').forEach(c=>c.checked=valores.includes(c.value));
+  etEtiqueta();
+}
 function render(){
   renderPendientes();
   const _ac=$('acelChip');
   if(_ac){
     const nombres={listas:'⚡ Listas para subir HOY',sinine:'📄 Sin INE aún',sinplan:'🛒 Con INE, sin plan/equipo'};
-    if(ACEL_SUB&&$('filterEtapa').value==='Aceleración pendiente'){_ac.innerHTML='Filtro: <b>'+nombres[ACEL_SUB]+'</b> <span style="cursor:pointer;font-weight:800">✕</span>';_ac.classList.remove('hidden');_ac.querySelector('span').onclick=()=>{ACEL_SUB=null;render();};}
+    if(ACEL_SUB&&etSeleccion().has('Aceleración pendiente')){_ac.innerHTML='Filtro: <b>'+nombres[ACEL_SUB]+'</b> <span style="cursor:pointer;font-weight:800">✕</span>';_ac.classList.remove('hidden');_ac.querySelector('span').onclick=()=>{ACEL_SUB=null;render();};}
     else _ac.classList.add('hidden');
   }
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
-  const etF=$('filterEtapa')?$('filterEtapa').value:'';
+  const etSet=etSeleccion();
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
     if(est==='__vender__'&&!(l.viabilidad==='VIABLE'&&l.etapa!=='Lead caído'))return false;
@@ -989,15 +1009,18 @@ function render(){
     if(est==='Venta exitosa'&&l.etapa!=='Venta exitosa')return false;
     if(est==='Lead caído'&&l.etapa!=='Lead caído')return false;
     if(agF&&String(l.agente_id)!==agF)return false;
-    if(etF==='__sin__'&&l.etapa)return false;
-    if(etF==='__ventahoy__'&&!(l.etapa==='Venta exitosa'&&diaLocal(l.fecha_venta||l.ultimo_movimiento)===isoLocal(new Date())))return false;
-    if(ACEL_SUB&&etF==='Aceleración pendiente'){
+    if(etSet.size){
+      const okSin=etSet.has('__sin__')&&!l.etapa;
+      const okVH=etSet.has('__ventahoy__')&&l.etapa==='Venta exitosa'&&diaLocal(l.fecha_venta||l.ultimo_movimiento)===isoLocal(new Date());
+      const okEt=l.etapa&&etSet.has(l.etapa);
+      if(!(okSin||okVH||okEt))return false;
+    }
+    if(ACEL_SUB&&etSet.has('Aceleración pendiente')){
       const hd=new Date().getDate();
       if(ACEL_SUB==='listas'&&!acelSubibleHoy(l))return false;
       if(ACEL_SUB==='sinine'&&l.acel_tiene_ine)return false;
       if(ACEL_SUB==='sinplan'&&!(l.acel_tiene_ine&&!(l.acel_plan&&l.acel_equipo)))return false;
     }
-    if(etF&&!['__sin__','__ventahoy__'].includes(etF)&&l.etapa!==etF)return false;
     return true;
   });
   const ultAct=l=>Math.max(new Date(l.ultimo_movimiento||l.creado_en||0).getTime(),l._notaFecha?new Date(l._notaFecha).getTime():0);
@@ -1060,8 +1083,12 @@ function etapaBadge(e){if(!e)return '<span class="muted-cell">—</span>';if(e==
 
 // ===== ETAPAS UI =====
 function buildEtapas(){
-  const fe=$('filterEtapa');
-  if(fe&&fe.options.length<=3)ETAPAS.forEach(e=>{const o=document.createElement('option');o.value=e.v;o.textContent=e.v;fe.appendChild(o);});
+  const eo=$('etOpciones');
+  if(eo&&!eo.dataset.listo){
+    const OPTS=[{v:'__ventahoy__',t:'💰 Vendidos HOY'},{v:'__sin__',t:'Sin tipificar'},...ETAPAS.map(e=>({v:e.v,t:e.v}))];
+    eo.innerHTML=OPTS.map(o=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer"><input type="checkbox" class="etChk" value="${o.v.replace(/"/g,'&quot;')}">${o.t}</label>`).join('');
+    eo.dataset.listo='1';
+  }
   const g=$('etapaGrid');g.innerHTML='';
   ETAPAS.forEach(e=>{
     const b=document.createElement('button');b.className='etapa-opt';b.dataset.v=e.v;
@@ -2196,7 +2223,7 @@ function renderTablas(which){
   else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if(!$('tablaCont'))return;$('tablaCont').innerHTML=h;
     $('tablaCont').querySelectorAll('.acelCard').forEach(cd=>cd.onclick=()=>{
       ACEL_SUB=cd.dataset.acel==='todas'?null:cd.dataset.acel;
-      $('filterEtapa').value='Aceleración pendiente';
+      etSoltar(['Aceleración pendiente']);
       setSeccion('operacion');render();
     });});}
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
@@ -4176,7 +4203,10 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('filterEtapa').addEventListener('change',()=>{ACEL_SUB=null;render();});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('etBtn').addEventListener('click',()=>$('etPanel').classList.toggle('hidden'));
+$('etOpciones').addEventListener('change',()=>{ACEL_SUB=null;etEtiqueta();render();});
+$('etLimpiar').addEventListener('click',()=>{etSoltar([]);ACEL_SUB=null;render();});
+document.addEventListener('click',e=>{const w=$('etWrap');if(w&&!w.contains(e.target))$('etPanel').classList.add('hidden');});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
