@@ -303,7 +303,7 @@ tbody tr:hover{background:#F7F8FF}
     <div id="opSection">
     <div class="kpis">
       <div class="kpi"><div class="kl">Leads</div><div class="kv" id="kLeads">0</div><div class="kf">registrados</div></div>
-      <div class="kpi"><div class="kl">Viables (vendibles)</div><div class="kv c" id="kViab">0</div><div class="kf" id="kViabPct">—</div></div>
+      <div class="kpi" onclick="kpiIr('vendibles')" style="cursor:pointer" title="Ver estos leads"><div class="kl">Viables (vendibles)</div><div class="kv c" id="kViab">0</div><div class="kf" id="kViabPct">—</div></div>
       <div class="kpi"><div class="kl">Ventas</div><div class="kv g" id="kVentas">0</div><div class="kf">cerradas</div></div>
       <div class="kpi"><div class="kl">Conversión</div><div class="kv b" id="kConv">—</div><div class="kf" id="kConvFoot">sobre vendibles</div></div>
     </div>
@@ -976,6 +976,21 @@ function renderPendientes(){
   P.querySelectorAll('.pendChip').forEach(b=>b.onclick=()=>{const l=LEADS.find(x=>String(x.id)===b.dataset.id);if(l)abrirDrawer(l);});
 }
 // ===== RENDER TABLA =====
+let KPI_SUB=null;
+const KPI_DEFS={
+  vendibles:{t:'🎯 Viables vendibles',f:l=>l.viabilidad==='VIABLE'&&!enMaduracion(l)&&!enEsperaAcel(l)&&!enEsperaLanz(l)},
+  madurando:{t:'🎂 Cocinándose (sin cumplir año)',f:l=>enMaduracion(l)},
+  espera:{t:'⏳ Esperando corte',f:l=>enEsperaAcel(l)},
+  apartados:{t:'📱 Apartados para lanzamiento',f:l=>enEsperaLanz(l)}
+};
+function kpiIr(tipo){
+  KPI_SUB=tipo;ACEL_SUB=null;
+  try{$('filterEstado').value='';}catch(e){}
+  try{etSoltar([]);}catch(e){}
+  try{$('search').value='';}catch(e){}
+  setSeccion('leads');
+  render();
+}
 function etSeleccion(){
   return new Set([...document.querySelectorAll('.etChk:checked')].map(c=>c.value));
 }
@@ -996,12 +1011,15 @@ function render(){
   if(_ac){
     const nombres={listas:'⚡ Listas para subir HOY',sinine:'📄 Sin INE aún',sinplan:'🛒 Con INE, sin plan/equipo'};
     if(ACEL_SUB&&etSeleccion().has('Aceleración pendiente')){_ac.innerHTML='Filtro: <b>'+nombres[ACEL_SUB]+'</b> <span style="cursor:pointer;font-weight:800">✕</span>';_ac.classList.remove('hidden');_ac.querySelector('span').onclick=()=>{ACEL_SUB=null;render();};}
+    else if(KPI_SUB&&KPI_DEFS[KPI_SUB]){_ac.innerHTML='Filtro: <b>'+KPI_DEFS[KPI_SUB].t+'</b> <span style="cursor:pointer;font-weight:800">✕</span>';_ac.classList.remove('hidden');_ac.querySelector('span').onclick=()=>{KPI_SUB=null;render();};}
     else _ac.classList.add('hidden');
   }
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
   const etSet=etSeleccion();
+  const kpiF=KPI_SUB&&KPI_DEFS[KPI_SUB]?KPI_DEFS[KPI_SUB].f:null;
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
+    if(kpiF&&!kpiF(l))return false;
     if(est==='__vender__'&&!(l.viabilidad==='VIABLE'&&l.etapa!=='Lead caído'))return false;
     if(est==='sin'&&l.viabilidad)return false;
     if(est==='VIABLE'&&l.viabilidad!=='VIABLE')return false;
@@ -1898,10 +1916,10 @@ async function renderDashboard(){
     ${asistenteHTML()}
     <div class="kpis6">
       <div class="kpi kpi-pro p1"><div class="kl">Leads</div><div class="kv" data-cu="${total}">0</div><div class="kf">en el sistema</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">Viables (vendibles)</div><div class="kv c" data-cu="${viabVend}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% viable del total</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">sin cumplir año</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">⏳ Esperando corte</div><div class="kv" style="color:#D97706" data-cu="${espera}">0</div><div class="kf">aceleraciones con fecha futura</div></div>
-      <div class="kpi kpi-pro p2"><div class="kl">📱 Apartados</div><div class="kv" style="color:#0891B2" data-cu="${espLanz}">0</div><div class="kf">esperando ${CFG.nombre_lanzamiento||'lanzamiento'}</div></div>
+      <div class="kpi kpi-pro p2" onclick="kpiIr('vendibles')" style="cursor:pointer" title="Ver estos leads"><div class="kl">Viables (vendibles)</div><div class="kv c" data-cu="${viabVend}">0</div><div class="kf">${total?Math.round(viab/total*100):0}% viable del total · clic para ver</div></div>
+      <div class="kpi kpi-pro p2" onclick="kpiIr('madurando')" style="cursor:pointer" title="Ver estos leads"><div class="kl">🎂 Cocinándose</div><div class="kv" style="color:#8B5CF6" data-cu="${madurando}">0</div><div class="kf">sin cumplir año · clic para ver</div></div>
+      <div class="kpi kpi-pro p2" onclick="kpiIr('espera')" style="cursor:pointer" title="Ver estos leads"><div class="kl">⏳ Esperando corte</div><div class="kv" style="color:#D97706" data-cu="${espera}">0</div><div class="kf">con fecha futura · clic para ver</div></div>
+      <div class="kpi kpi-pro p2" onclick="kpiIr('apartados')" style="cursor:pointer" title="Ver estos leads"><div class="kl">📱 Apartados</div><div class="kv" style="color:#0891B2" data-cu="${espLanz}">0</div><div class="kf">esperando ${CFG.nombre_lanzamiento||'lanzamiento'} · clic para ver</div></div>
       <div class="kpi kpi-pro p3"><div class="kl">Ventas</div><div class="kv g" data-cu="${vent}">0</div><div class="kf">cerradas</div></div>
       <div class="kpi kpi-pro p4"><div class="kl">Conversión</div><div class="kv p" data-cu="${conv}" data-suf="%">0</div><div class="kf">sobre ${viabVend.toLocaleString()} vendibles${madurando?' · '+madurando+' 🎂':''}${espera?' · '+espera+' ⏳':''}${espLanz?' · '+espLanz+' 📱':''}</div></div>
       <div class="kpi kpi-pro p5"><div class="kl">Rechazos</div><div class="kv r" data-cu="${rech}">0</div><div class="kf">fuera de cartera</div></div>
@@ -4203,27 +4221,9 @@ $('btnVerArch').onclick=async()=>{VER_ARCH=!VER_ARCH;$('btnVerArch').style.backg
 $('lanzFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;$('lanzFileName').textContent='📄 '+f.name;show($('lanzFileName'));try{lanzFilas=await leerExcel(f);$('btnDepurar').disabled=false;$('lanzResultado').innerHTML='';$('lanzRegistro').classList.add('hidden');}catch(err){toast('No pude leer el Excel',false);}});
 $('btnDepurar').onclick=depurarLanzamiento;
 $('btnRegistrarLanz').onclick=registrarLanzamiento;
-$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',render);$('etBtn').addEventListener('click',()=>$('etPanel').classList.toggle('hidden'));
-$('etOpciones').addEventListener('change',()=>{ACEL_SUB=null;etEtiqueta();render();});
+$('search').addEventListener('input',refrescar);$('filterEstado').addEventListener('change',()=>{KPI_SUB=null;render();});$('etBtn').addEventListener('click',()=>$('etPanel').classList.toggle('hidden'));
+$('etOpciones').addEventListener('change',()=>{ACEL_SUB=null;KPI_SUB=null;etEtiqueta();render();});
 $('etLimpiar').addEventListener('click',()=>{etSoltar([]);ACEL_SUB=null;render();});
 document.addEventListener('click',e=>{const w=$('etWrap');if(w&&!w.contains(e.target))$('etPanel').classList.add('hidden');});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
 $('filterAgente').addEventListener('change',refrescar);
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
-
-bindSeg('segAdeudo',v=>{st.adeudo=v;$('fMontoAdeudo').classList.toggle('hidden',v!=='Sí');recalcViab();});
-bindSeg('segRenovar',v=>{st.renovable=v;$('fNoRenovar').classList.toggle('hidden',v!=='No');recalcViab();});
-bindSeg('segIne',v=>{st.ine=v;$('aIneFile').classList.toggle('hidden',v!=='Sí');$('aVentaFields').classList.toggle('hidden',v!=='Sí');});
-bindSeg('segFaltaQue',v=>{st.faltaQue=v;});
-bindSeg('segLinEq',v=>{st.linEq=v;$('lEquipoW').classList.toggle('hidden',v!=='Con equipo');});
-$('snFecha').addEventListener('input',recalcSinAno);
-$('lzEquipoSel').addEventListener('change',()=>{$('lzOtroW').classList.toggle('hidden',$('lzEquipoSel').value!=='__otro__');});
-$('dPrepago').addEventListener('change',recalcViab);
-$('aUltimaCuota').addEventListener('change',recalcAcel);$('aDiaCorte').addEventListener('input',recalcAcel);
-$('aEquipo').addEventListener('input',e=>{$('aAppsField').classList.toggle('hidden',!e.target.value.trim());});
-$('aInePdf').addEventListener('change',e=>{if(e.target.files[0])subirIne(e.target.files[0]);});
-
-boot();
-</script>
-</body>
-</html>
