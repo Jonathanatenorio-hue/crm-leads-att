@@ -999,6 +999,15 @@ function kpiIr(tipo){
   try{$('filterEstado').value='';}catch(e){}
   try{etSoltar([]);}catch(e){}
   try{$('search').value='';}catch(e){}
+  try{
+    const fa=$('filterAgente');
+    if(fa&&typeof DFILT!=='undefined'){
+      if(DFILT.ag){
+        const op=[...fa.options].find(o=>(o.textContent||'').trim()===DFILT.ag);
+        fa.value=op?op.value:'';
+      }else fa.value='';
+    }
+  }catch(e){}
   setSeccion('operacion');
   render();
 }
@@ -1733,42 +1742,66 @@ function resumenCRM(){
     leads_por_agente_por_dia_ultimos_14:agDia14,por_campana:porCamp,
     nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; apartados_lanzamiento=esperando preventa del equipo nuevo; al llegar sus fechas vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
 }
+function iaSeleccion(){
+  return new Set([...document.querySelectorAll('.iaChk:checked')].map(c=>c.value));
+}
+function iaLlenar(){
+  const eo=$('iaOpciones');if(!eo)return;
+  const nombres=[...new Set(LEADS.map(l=>l.agentes?.nombre).filter(Boolean))].sort();
+  const previos=iaSeleccion();
+  eo.innerHTML=nombres.map(n=>`<label style="display:flex;gap:8px;align-items:center;padding:3px 2px;cursor:pointer"><input type="checkbox" class="iaChk" value="${n.replace(/"/g,'&quot;')}"${previos.has(n)?' checked':''}>${n}</label>`).join('');
+}
+function iaEtiqueta(){
+  const s=iaSeleccion(),b=$('iaBtn');if(!b)return;
+  b.textContent=(!s.size?'👥 Todos':s.size===1?'👤 '+[...s][0]:'👥 '+s.size+' agentes')+' ▾';
+}
 function informeWhats(){
   const hoyTxt=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+  const SEL=iaSeleccion();
+  const LSEL=SEL.size?LEADS.filter(l=>SEL.has(l.agentes?.nombre||'—')):LEADS;
+  const hoyIso=isoLocal(new Date());
   const A={};
-  LEADS.forEach(l=>{
+  LSEL.forEach(l=>{
     const ag=l.agentes?.nombre||'—';
-    const o=A[ag]=A[ag]||{cartera:0,viables:0,ventas:0,activos:0,et:{}};
-    o.cartera++;
-    if(l.viabilidad==='VIABLE')o.viables++;
+    const o=A[ag]=A[ag]||{ventas:0,activos:0,cierre:0,acelLista:0,cots:0,trabajar:0,citas:0,frios:0,detalle:{}};
     if(l.etapa==='Venta exitosa'){o.ventas++;return;}
     if(l.etapa==='Lead caído')return;
-    if(l.viabilidad!=='VIABLE')return;           // solo cartera viva: viables sin cerrar ni caer
-    if(enMaduracion(l))return;                   // 🎂 hibernando: no cuentan hasta la víspera
-    if(enEsperaAcel(l))return;                   // ⏳ aceleración esperando corte: fuera de la cartera del día
-    if(enEsperaLanz(l))return;                   // 📱 apartado para lanzamiento: fuera hasta la víspera
+    if(l.viabilidad!=='VIABLE')return;
+    if(enMaduracion(l))return;
+    if(enEsperaAcel(l))return;
+    if(enEsperaLanz(l))return;
     o.activos++;
-    const e=l.etapa||'Sin tipificar';o.et[e]=(o.et[e]||0)+1;
+    const e=l.etapa||'Sin tipificar';o.detalle[e]=(o.detalle[e]||0)+1;
+    if(['Falta pago inicial','Falta contrato firmado','Falta INE o biométrico'].includes(e))o.cierre++;
+    else if(e==='Aceleración pendiente'){o.cierre++;o.acelLista++;}
+    else if(e==='Cotización enviada')o.cots++;
+    else o.trabajar++;
+    if(l.proximo_contacto===hoyIso)o.citas++;
+    const ref=Math.max(l._notaFecha?new Date(l._notaFecha).getTime():0,l.ultimo_movimiento?new Date(l.ultimo_movimiento).getTime():0,new Date(l.creado_en).getTime());
+    if(Date.now()-ref>864e5&&!(l.proximo_contacto&&l.proximo_contacto>hoyIso))o.frios++;
   });
-  const ORDEN=['Falta pago inicial','Falta contrato firmado','Falta INE o biométrico','Aceleración pendiente','Línea adicional','Cotización enviada','Adeudo mensualidad','Inicio de negociación','Sin tipificar'];
-  let t='📊 *ARRANQUE DEL DÍA — '+hoyTxt.toUpperCase()+'*\n';
-  t+='_Cartera VIVA por agente (viables por trabajar)_\n\n';
+  let t='📊 *ARRANQUE DEL DÍA — '+hoyTxt.toUpperCase()+'*'+(SEL.size?' · '+(SEL.size===1?[...SEL][0]:SEL.size+' agentes'):'')+'\n';
+  t+='_Tu cancha de hoy, ordenada por cercanía al cierre_\n\n';
   Object.entries(A).filter(([,o])=>o.activos>0||o.ventas>0)
     .sort((a,b)=>b[1].activos-a[1].activos)
     .forEach(([ag,o])=>{
-      t+='👤 *'+ag+'* — 🎯 *'+o.activos+' para vender* · '+o.ventas+' ✅\n';
-      ORDEN.forEach(e=>{if(o.et[e])t+='   · '+e+': '+o.et[e]+'\n';});
+      t+='👤 *'+ag+'* — 🎯 *'+o.activos+' en juego* · '+o.ventas+' ventas\n';
+      if(o.cierre)t+='   🔥 Cierres a un paso: *'+o.cierre+'*'+(o.acelLista?' ('+o.acelLista+' acel. subibles YA)':'')+'\n';
+      if(o.cots)t+='   🧾 Cotizaciones vivas: '+o.cots+' — remátalas\n';
+      if(o.trabajar)t+='   🌱 Por abrir/trabajar: '+o.trabajar+'\n';
+      const extras=[o.citas?'📅 '+o.citas+' citas HOY':null,o.frios?'⏰ '+o.frios+' sin tocar +24h':null].filter(Boolean);
+      if(extras.length)t+='   '+extras.join(' · ')+'\n';
       t+='\n';});
   const activosTot=Object.values(A).reduce((s,o)=>s+o.activos,0);
   const ventTot=Object.values(A).reduce((s,o)=>s+o.ventas,0);
-  const cerca=LEADS.filter(l=>['Falta pago inicial','Falta contrato firmado','Falta INE o biométrico','Aceleración pendiente'].includes(l.etapa)).length;
-  const sinTip=LEADS.filter(l=>l.viabilidad==='VIABLE'&&!l.etapa).length;
+  const cerca=Object.values(A).reduce((s,o)=>s+o.cierre,0);
+  const sinTip=LSEL.filter(l=>l.viabilidad==='VIABLE'&&!l.etapa&&l.etapa!=='Lead caído').length;
   t+='━━━━━━━━━━━━━━\n';
   t+='🎯 *'+activosTot+' leads vivos para vender hoy* · '+ventTot+' ventas acumuladas\n';
   t+='🔥 *'+cerca+' a un paso de cerrar* (pago/contrato/INE/aceleración)\n';
-  const espTot=LEADS.filter(l=>enEsperaAcel(l)).length;
+  const espTot=LSEL.filter(l=>enEsperaAcel(l)).length;
   if(espTot)t+='⏳ '+espTot+' aceleraciones esperando su corte (con fecha) — prepáralas: INE + plan\n';
-  const lanzTot=LEADS.filter(l=>enEsperaLanz(l)).length;
+  const lanzTot=LSEL.filter(l=>enEsperaLanz(l)).length;
   if(lanzTot)t+='📱 '+lanzTot+' apartados para '+(CFG.nombre_lanzamiento||'el lanzamiento')+'\n';
   if(sinTip)t+='⚠️ '+sinTip+' viables sin tipificar — ¡primer contacto pendiente!\n';
   t+='¡Vamos por un día histórico! 💪';
@@ -1779,7 +1812,7 @@ function informeWhats(){
 function asistenteHTML(){
   const chips=['¿De los leads de hoy cuántos son viables?','¿Qué agente tiene mejor conversión?','¿Qué campaña está rindiendo mejor?','¿Quién recibió más leads esta semana?'];
   return `<div class="dash-card span2" style="margin-bottom:16px"><h3>🤖 Pregúntale a tu CRM</h3>
-    <div class="dc-sub" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>Escribe tu pregunta en español normal — responde con los datos en vivo</span><button class="btn btn-ghost" id="btnInfWhats" style="font-size:12px;white-space:nowrap">📋 Informe de arranque (WhatsApp)</button></div>
+    <div class="dc-sub" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>Escribe tu pregunta en español normal — responde con los datos en vivo</span><span style="position:relative" id="iaWrap"><button class="btn btn-ghost" id="iaBtn" style="font-size:12px;white-space:nowrap">👥 Todos ▾</button><div id="iaPanel" class="hidden" style="position:absolute;top:36px;right:0;z-index:95;background:var(--surface,#fff);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.15);padding:10px 12px;min-width:220px;max-height:300px;overflow:auto"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12px">Agentes del informe</b><button class="btn btn-ghost" id="iaLimpiar" style="font-size:11px;padding:2px 8px">Todos</button></div><div id="iaOpciones" style="display:flex;flex-direction:column;gap:2px;font-size:13px"></div></div></span><button class="btn btn-ghost" id="btnInfWhats" style="font-size:12px;white-space:nowrap">📋 Informe de arranque (WhatsApp)</button></div>
     <div id="chatHist" style="display:flex;flex-direction:column;gap:10px;margin:12px 0;max-height:320px;overflow-y:auto">
       ${CHAT.map(m=>`<div style="padding:10px 14px;border-radius:12px;max-width:85%;white-space:pre-wrap;font-size:13.5px;line-height:1.5;${m.rol==='tu'?'align-self:flex-end;background:var(--brand,#4F46E5);color:#fff':'align-self:flex-start;background:var(--bg-soft,#F3F4F6)'}">${m.txt}</div>`).join('')}
     </div>
@@ -2022,6 +2055,12 @@ async function renderDashboard(){
   };
   const _ba=$('btnArchivarMasa');if(_ba){_ba.onclick=archivarMasivo;$('arcTipo').onchange=previewArchivo;$('arcDias').onchange=previewArchivo;previewArchivo();}
   $('btnInforme').onclick=generarInforme;
+  const _iab=$('iaBtn');
+  if(_iab){_iab.onclick=()=>{iaLlenar();$('iaPanel').classList.toggle('hidden');};}
+  const _iao=$('iaOpciones');
+  if(_iao)_iao.onchange=iaEtiqueta;
+  const _ial=$('iaLimpiar');
+  if(_ial)_ial.onclick=()=>{document.querySelectorAll('.iaChk').forEach(c=>c.checked=false);iaEtiqueta();};
   $('tbltabs').querySelectorAll('button').forEach(b=>b.onclick=()=>renderTablas(b.dataset.t));
   $('btnExportTabla').onclick=exportTabla;
   renderTablas('agente');
