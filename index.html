@@ -9,7 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 :root{
@@ -2303,10 +2303,43 @@ function renderTablas(which){
 }
 function exportTabla(){
   const {headers,rows,name}=LAST_TABLA;
-  const aoa=[headers,...rows];
+  const NAVY='0B1B33', AZUL='1E6FD9', GRIS='F4F7FB', LINEA='D9DDE3', NARANJA='FF7200';
+  const hoy=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  // columna de barras: la de Ventas si existe, si no la última numérica
+  let colBar=headers.findIndex(h=>/venta/i.test(String(h)));
+  if(colBar<0)for(let c=headers.length-1;c>=0;c--){if(rows.some(r=>typeof r[c]==='number'&&r[c]>0)){colBar=c;break;}}
+  const maxBar=colBar>=0?Math.max(1,...rows.filter(r=>String(r[0])!=='TOTAL').map(r=>+r[colBar]||0)):1;
+  const H=[...headers]; if(colBar>=0)H.push('Gráfica');
+  const cuerpo=rows.map(r=>{
+    const fila=[...r];
+    if(colBar>=0)fila.push(String(r[0])==='TOTAL'?'':'█'.repeat(Math.round((+r[colBar]||0)/maxBar*14)));
+    return fila;
+  });
+  const aoa=[[name.toUpperCase()],['ExpertCell · CRM de leads · generado el '+hoy],[],H,...cuerpo];
   const ws=XLSX.utils.aoa_to_sheet(aoa);
+  const nCols=H.length, hdrRow=3;
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:nCols-1}},{s:{r:1,c:0},e:{r:1,c:nCols-1}}];
+  ws['!cols']=H.map((h,c)=>({wch:Math.min(Math.max(String(h).length+2,...aoa.slice(4).map(r=>String(r[c]??'').length+2)),34)}));
+  ws['!rows']=[{hpt:26},{hpt:14},{hpt:6},{hpt:20}];
+  const borde={style:'thin',color:{rgb:LINEA}};
+  for(let R=0;R<aoa.length;R++)for(let C=0;C<nCols;C++){
+    const ref=XLSX.utils.encode_cell({r:R,c:C}); const cell=ws[ref]; if(!cell)continue;
+    if(R===0)cell.s={font:{name:'Arial',bold:true,sz:14,color:{rgb:NAVY}}};
+    else if(R===1)cell.s={font:{name:'Arial',sz:9,color:{rgb:'667085'}}};
+    else if(R===hdrRow)cell.s={font:{name:'Arial',bold:true,sz:9,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:NAVY}},alignment:{horizontal:'center',vertical:'center'},border:{bottom:borde}};
+    else{
+      const esTotal=String(aoa[R][0])==='TOTAL';
+      const esBar=H[C]==='Gráfica';
+      cell.s={font:{name:'Arial',sz:9,bold:esTotal,color:{rgb:esBar?AZUL:(esTotal?NAVY:'1F2937')}},
+              fill:esTotal?{fgColor:{rgb:'FFF3E8'}}:((R-hdrRow)%2===0?{fgColor:{rgb:GRIS}}:undefined),
+              alignment:{horizontal:C===0||esBar?'left':'center'},
+              border:{bottom:borde}};
+      if(typeof cell.v==='number'&&!Number.isInteger(cell.v))cell.s.numFmt='#,##0.0';
+    }
+  }
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));
   XLSX.writeFile(wb,name+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('📊 Excel con formato descargado');
 }
 async function generarInforme(){
   toast('Generando informe…');
