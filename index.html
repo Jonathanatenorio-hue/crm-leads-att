@@ -1620,6 +1620,9 @@ function mapearColumnas(rows){
 async function procesarCarga(){
   if(!cargaFilas)return toast('Elige un archivo primero',false);
   const btn=$('btnCargar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
+  // Catálogo SIEMPRE fresco: si la carga de login falló en silencio o hay agentes nuevos, aquí se corrige
+  try{await cargarSelectsAsignar();}catch(e){}
+  if(!AGENTES_LISTA.length){btn.disabled=false;btn.textContent='Procesar carga';$('cargaResultado').innerHTML='<div class="dash-empty" style="color:var(--red)">No pude cargar el catálogo de agentes (¿conexión?). Reintenta en unos segundos.</div>';return;}
   const res=$('cargaResultado');res.innerHTML='';
   const datos=mapearColumnas(cargaFilas);
   if(!datos||datos.length===0){btn.disabled=false;btn.textContent='Procesar carga';res.innerHTML='<div class="dash-empty" style="color:var(--red)">No encontré filas válidas. Revisa las columnas Campaña, Agente y Teléfono.</div>';return;}
