@@ -1559,7 +1559,7 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
-let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, cargaFilas=null, rzFilas=null;
+let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, cargaFilas=null, rzFilas=null;
 // Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
 function resolverAgente(txt){
   const q=norm(txt);
@@ -1858,9 +1858,10 @@ async function cargarSupMap(){
   SUPMAP={};
   try{
     const [{data:ags},{data:sups}]=await Promise.all([
-      db.from('agentes').select('id,nombre,supervisor_id'),
+      db.from('agentes').select('id,nombre,supervisor_id,centro'),
       db.from('supervisores').select('id,nombre')]);
     const S={};(sups||[]).forEach(s=>S[s.id]=s.nombre);
+    CENTROMAP={};(ags||[]).forEach(a=>{if(a.centro)CENTROMAP[a.nombre]=a.centro;});
     AGPORID={};
     (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];
       AGPORID[a.id]={nombre:a.nombre,supervisor:S[a.supervisor_id]||null};});
@@ -2306,7 +2307,28 @@ function renderTablas(which){
   else c.innerHTML=tablaGlobal();
 }
 function exportTabla(){
-  const {headers,rows,name}=LAST_TABLA;
+  let {headers,rows,name}=LAST_TABLA;
+  // FUSIÓN: al exportar el resumen por agente, anexar el embudo (etapas) en la misma hoja
+  if(String(headers[0])==='Agente'&&headers.some(h=>/% conv/.test(String(h)))){
+    const CORTO={'Inicio de negociación':'Inicio','Adeudo mensualidad':'Adeudo','Interesado (sin cumplir año)':'🎂 Sin año','En espera de lanzamiento':'📱 Lanzam.','Cotización enviada':'Cotización','Aceleración pendiente':'Aceleración','Falta INE o biométrico':'Falta INE','Falta contrato firmado':'Falta contrato','Falta pago inicial':'Falta pago','Línea adicional':'Línea adic.','Lead caído':'Caídos'};
+    const ETF=['Sin trabajar',...ETAPAS_CRM.filter(e=>e!=='Venta exitosa')];
+    const L=dashLeads(), EMB={};
+    L.filter(l=>l.viabilidad==='VIABLE').forEach(l=>{
+      const n=l.agentes?.nombre||'—'; const a=EMB[n]=EMB[n]||{};
+      const e=l.etapa||'Sin trabajar'; if(e!=='Venta exitosa')a[e]=(a[e]||0)+1;
+    });
+    headers=[...headers,...ETF.map(e=>CORTO[e]||e)];
+    rows=rows.map(r=>{
+      const nom=String(r[0]);
+      if(nom==='TOTAL'){
+        const tot=ETF.map(e=>Object.values(EMB).reduce((s,a)=>s+(a[e]||0),0));
+        return [...r,...tot];
+      }
+      const a=EMB[nom]||{};
+      return [...r,...ETF.map(e=>a[e]||0)];
+    });
+    name='Resumen + Embudo por agente';
+  }
   const NAVY='0B1B33', AZUL='1E6FD9', GRIS='F4F7FB', LINEA='D9DDE3', NARANJA='FF7200';
   const hoy=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   // columna de barras: la de Ventas si existe, si no la última numérica
@@ -2314,11 +2336,33 @@ function exportTabla(){
   if(colBar<0)for(let c=headers.length-1;c>=0;c--){if(rows.some(r=>typeof r[c]==='number'&&r[c]>0)){colBar=c;break;}}
   const maxBar=colBar>=0?Math.max(1,...rows.filter(r=>String(r[0])!=='TOTAL').map(r=>+r[colBar]||0)):1;
   const H=[...headers]; if(colBar>=0)H.push('Gráfica');
-  const cuerpo=rows.map(r=>{
-    const fila=[...r];
-    if(colBar>=0)fila.push(String(r[0])==='TOTAL'?'':'█'.repeat(Math.round((+r[colBar]||0)/maxBar*14)));
-    return fila;
-  });
+  const dinero=v=>{const n=parseFloat(String(v??'').replace(/[$,]/g,''));return isNaN(n)?null:n;};
+  const conBarra=r=>{const fila=[...r];if(colBar>=0)fila.push(String(r[0])==='TOTAL'||String(r[0]).startsWith('▸')?'':'█'.repeat(Math.round((+r[colBar]||0)/maxBar*14)));return fila;};
+  const esAgentes=String(headers[0])==='Agente'&&Object.keys(CENTROMAP||{}).length>0;
+  let cuerpo=[];
+  if(esAgentes){
+    const totalRow=rows.find(r=>String(r[0])==='TOTAL');
+    const agRows=rows.filter(r=>String(r[0])!=='TOTAL');
+    const grupos={};agRows.forEach(r=>{const c=CENTROMAP[String(r[0])]||'Sin centro';(grupos[c]=grupos[c]||[]).push(r);});
+    const orden=['JV','CC2',...Object.keys(grupos).filter(g=>!['JV','CC2'].includes(g))];
+    const iLeads=headers.indexOf('Leads'),iViab=headers.indexOf('Viables'),iMad=headers.findIndex(h=>/Madurando/.test(h)),iEsp=headers.findIndex(h=>/Esp\. corte/.test(h)),iApa=headers.findIndex(h=>/Apartados/.test(h)),iVen=headers.indexOf('Ventas'),iPV=headers.findIndex(h=>/% viab/.test(h)),iPC=headers.findIndex(h=>/% conv/.test(h)),iAde=headers.findIndex(h=>/Adeudo/.test(h));
+    orden.forEach(c=>{
+      const g=grupos[c];if(!g||!g.length)return;
+      cuerpo.push(conBarra(['▸ '+c+' ('+g.length+' agentes)',...Array(headers.length-1).fill('')]));
+      g.forEach(r=>cuerpo.push(conBarra(r)));
+      const sub=headers.map((h,i)=>{
+        if(i===0)return 'Subtotal '+c;
+        const nums=g.map(r=>+r[i]).filter(n=>!isNaN(n));
+        if(nums.length===g.length)return nums.reduce((a,b)=>a+b,0);
+        if(i===iAde){const s=g.reduce((a,r)=>a+(dinero(r[i])||0),0);return '$'+s.toLocaleString('es-MX');}
+        return '';
+      });
+      if(iPV>=0&&iLeads>=0&&iViab>=0&&+sub[iLeads]>0)sub[iPV]=Math.round(+sub[iViab]/+sub[iLeads]*100)+'%';
+      if(iPC>=0&&iVen>=0&&iViab>=0){const vend=+sub[iViab]-(+sub[iMad]||0)-(+sub[iEsp]||0)-(+sub[iApa]||0);sub[iPC]=vend>0?Math.round(+sub[iVen]/vend*100)+'%':'—';}
+      cuerpo.push(conBarra(sub));
+    });
+    if(totalRow)cuerpo.push(conBarra(totalRow));
+  }else cuerpo=rows.map(conBarra);
   const aoa=[[name.toUpperCase()],['ExpertCell · CRM de leads · generado el '+hoy],[],H,...cuerpo];
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   const nCols=H.length, hdrRow=3;
@@ -2332,13 +2376,27 @@ function exportTabla(){
     else if(R===1)cell.s={font:{name:'Arial',sz:9,color:{rgb:'667085'}}};
     else if(R===hdrRow)cell.s={font:{name:'Arial',bold:true,sz:9,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:NAVY}},alignment:{horizontal:'center',vertical:'center'},border:{bottom:borde}};
     else{
-      const esTotal=String(aoa[R][0])==='TOTAL';
+      const primero=String(aoa[R][0]);
+      const esTotal=primero==='TOTAL', esSeccion=primero.startsWith('▸'), esSub=primero.startsWith('Subtotal');
       const esBar=H[C]==='Gráfica';
-      cell.s={font:{name:'Arial',sz:9,bold:esTotal,color:{rgb:esBar?AZUL:(esTotal?NAVY:'1F2937')}},
-              fill:esTotal?{fgColor:{rgb:'FFF3E8'}}:((R-hdrRow)%2===0?{fgColor:{rgb:GRIS}}:undefined),
+      cell.s={font:{name:'Arial',sz:9,bold:esTotal||esSeccion||esSub,color:{rgb:esBar?AZUL:(esSeccion?'FFFFFF':(esTotal||esSub?NAVY:'1F2937'))}},
+              fill:esSeccion?{fgColor:{rgb:'1B3D77'}}:(esSub?{fgColor:{rgb:'E8F0FC'}}:(esTotal?{fgColor:{rgb:'FFF3E8'}}:((R-hdrRow)%2===0?{fgColor:{rgb:GRIS}}:undefined))),
               alignment:{horizontal:C===0||esBar?'left':'center'},
               border:{bottom:borde}};
       if(typeof cell.v==='number'&&!Number.isInteger(cell.v))cell.s.numFmt='#,##0.0';
+      if(!esSeccion){
+        const hd=String(H[C]);
+        const p=(String(cell.v).match(/([\d.]+)\s*%/)||[])[1];
+        if(p!==undefined){
+          const v=parseFloat(p);let sem=null;
+          if(/% conv/.test(hd))sem=v>=20?'V':(v>=16?'A':'R');
+          else if(/% viab/.test(hd))sem=v>=60?'V':(v>=45?'A':'R');
+          if(sem){
+            const F={V:['D1FAE5','065F46'],A:['FEF3C7','92400E'],R:['FEE2E2','B91C1C']}[sem];
+            cell.s.fill={fgColor:{rgb:F[0]}};cell.s.font.color={rgb:F[1]};cell.s.font.bold=true;
+          }
+        }
+      }
     }
   }
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));
