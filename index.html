@@ -1766,7 +1766,8 @@ function informeWhats(){
   const A={};
   LSEL.forEach(l=>{
     const ag=l.agentes?.nombre||'—';
-    const o=A[ag]=A[ag]||{ventas:0,activos:0,cierre:0,acelLista:0,cots:0,trabajar:0,citas:0,frios:0,detalle:{}};
+    const o=A[ag]=A[ag]||{ventas:0,activos:0,vendibles:0,cierre:0,acelLista:0,cots:0,trabajar:0,citas:0,frios:0,detalle:{}};
+    if(l.viabilidad==='VIABLE'&&!enMaduracion(l)&&!enEsperaAcel(l)&&!enEsperaLanz(l))o.vendibles++;
     if(l.etapa==='Venta exitosa'){o.ventas++;return;}
     if(l.etapa==='Lead caído')return;
     if(l.viabilidad!=='VIABLE')return;
@@ -1788,7 +1789,8 @@ function informeWhats(){
   Object.entries(A).filter(([,o])=>o.activos>0||o.ventas>0)
     .sort((a,b)=>b[1].activos-a[1].activos)
     .forEach(([ag,o])=>{
-      t+='👤 *'+ag+'* — 🎯 *'+o.activos+' en juego* · '+o.ventas+' ventas\n';
+      const convA=o.vendibles>0?Math.round(o.ventas/o.vendibles*100):0;
+      t+='👤 *'+ag+'* — 🎯 *'+o.activos+' en juego* · '+o.ventas+' ventas · 📈 *'+convA+'%* conv.\n';
       if(o.cierre)t+='   🔥 Cierres a un paso: *'+o.cierre+'*'+(o.acelLista?' ('+o.acelLista+' acel. subibles YA)':'')+'\n';
       if(o.cots)t+='   🧾 Cotizaciones vivas: '+o.cots+' — remátalas\n';
       if(o.trabajar)t+='   🌱 Por abrir/trabajar: '+o.trabajar+'\n';
@@ -1800,7 +1802,9 @@ function informeWhats(){
   const cerca=Object.values(A).reduce((s,o)=>s+o.cierre,0);
   const sinTip=LSEL.filter(l=>l.viabilidad==='VIABLE'&&!l.etapa&&l.etapa!=='Lead caído').length;
   t+='━━━━━━━━━━━━━━\n';
-  t+='🎯 *'+activosTot+' leads vivos para vender hoy* · '+ventTot+' ventas acumuladas\n';
+  const vendTot=Object.values(A).reduce((s,o)=>s+o.vendibles,0);
+  const convTot=vendTot>0?Math.round(ventTot/vendTot*100):0;
+  t+='🎯 *'+activosTot+' leads vivos para vender hoy* · '+ventTot+' ventas · 📈 conversión del equipo: *'+convTot+'%*\n';
   t+='🔥 *'+cerca+' a un paso de cerrar* (pago/contrato/INE/aceleración)\n';
   const espTot=LSEL.filter(l=>enEsperaAcel(l)).length;
   if(espTot)t+='⏳ '+espTot+' aceleraciones esperando su corte (con fecha) — prepáralas: INE + plan\n';
