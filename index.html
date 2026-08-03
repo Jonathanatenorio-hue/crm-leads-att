@@ -439,8 +439,8 @@ tbody tr:hover{background:#F7F8FF}
           <div style="font-weight:700;margin-bottom:4px">Registrar lanzamiento aprobado</div>
           <div class="dc-sub">Crea la campaña y agrega los números LIMPIOS a la base de enviados. Después de esto ya puedes subirlos a iVentas.</div>
           <div class="row2" style="margin-bottom:10px">
-            <div class="field"><label>Nombre de la campaña</label><input id="lzNombre" type="text" placeholder="Ej. Armalo 21-25 110726"></div>
-            <div class="field"><label>Fecha de envío</label><input id="lzFecha" type="date"></div>
+            <div class="field"><label>Nombre de la campaña</label><input id="lzNombre" type="text" autocomplete="off" placeholder="Ej. Armalo 21-25 110726"></div>
+            <div class="field"><label>Fecha de envío</label><input id="lzFecha" type="date" autocomplete="off"></div>
           </div>
           <button class="btn btn-primary" id="btnRegistrarLanz">🚀 Registrar lanzamiento</button>
           <div id="lanzRegResultado" style="margin-top:12px"></div>
@@ -2003,8 +2003,8 @@ async function renderDashboard(){
       <div class="dc-sub">Preventa estimada: <b>${CFG.fecha_lanzamiento?fechaLarga(new Date(CFG.fecha_lanzamiento+'T12:00:00')):'sin definir'}</b> · apartados: <b>${LEADS.filter(l=>l.etapa==='En espera de lanzamiento').length}</b> — la demanda capturada por los agentes:</div>
       ${(()=>{const D={};LEADS.filter(l=>l.etapa==='En espera de lanzamiento').forEach(l=>{const e=(l.lanz_equipo||'Sin especificar').trim();D[e]=(D[e]||0)+1;});const ent=Object.entries(D).sort((a,b)=>b[1]-a[1]);return ent.length?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+ent.map(([e,n])=>`<span class="badge" style="background:#ECFEFF;color:#155E75;padding:5px 12px;font-size:12px">${e}: <b>${n}</b></span>`).join('')+'</div>':'<div class="dash-empty" style="font-size:12px;margin-top:8px">Aún no hay apartados — cuando los agentes tipifiquen, aquí verás la demanda por modelo.</div>';})()}
       ${AGENTE.rol==='director'?`<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
-        <input type="text" id="lzNombre" placeholder="Nombre (ej. iPhone 18)" value="${CFG.nombre_lanzamiento||''}" style="flex:1;min-width:150px">
-        <input type="date" id="lzFecha" value="${CFG.fecha_lanzamiento||''}">
+        <input type="text" id="cfgLzNombre" placeholder="Nombre (ej. iPhone 18)" value="${CFG.nombre_lanzamiento||''}" style="flex:1;min-width:150px">
+        <input type="date" id="cfgLzFecha" value="${CFG.fecha_lanzamiento||''}">
         <button class="btn btn-ghost" id="btnLzGuardar" style="white-space:nowrap">Guardar</button>
       </div>
       <div style="margin-top:8px"><input type="text" id="lzModelos" value="${(CFG.modelos_lanzamiento||'').replace(/"/g,'&quot;')}" placeholder="Modelos separados por coma" style="width:100%"><div class="hint" style="font-size:11.5px;margin-top:4px">Los modelos que los agentes verán en la lista, separados por coma. Agrega capacidades si quieres medirlas (ej. "iPhone 18 Pro Max 256GB, iPhone 18 Pro Max 512GB").</div></div>`:''}
@@ -2049,7 +2049,7 @@ async function renderDashboard(){
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
   const _lz=$('btnLzGuardar');if(_lz)_lz.onclick=async()=>{
-    const n=$('lzNombre').value.trim(),f=$('lzFecha').value;
+    const n=$('cfgLzNombre').value.trim(),f=$('cfgLzFecha').value;
     if(!n||!f)return toast('Captura nombre y fecha del lanzamiento',false);
     try{
       await db.from('config_crm').upsert({clave:'nombre_lanzamiento',valor:n});
@@ -2644,7 +2644,7 @@ async function registrarLanzamiento(){
   btn.disabled=false;btn.innerHTML='🚀 Registrar lanzamiento';
   $('lanzRegResultado').innerHTML='<div class="viab-banner vi">✅ Campaña <b>'+nombre+'</b> registrada: '+agregados+' números agregados a la base'+(existian?' ('+existian+' ya existían)':'')+'. Sube la lista limpia a iVentas y actualiza los mensajes enviados en Gestionar campañas.</div>';
   toast('Lanzamiento registrado');
-  lanzLimpios=null;$('lanzNombre').value='';$('lanzFecha').value='';
+  lanzLimpios=null;if($('lzNombre'))$('lzNombre').value='';if($('lzFecha'))$('lzFecha').value='';
   $('fileLanz').value='';$('lanzResumen').innerHTML='<div class="dash-empty">✅ Lanzamiento registrado. Para otro lanzamiento, depura una base nueva.</div>';
   await cargarCampanas();await cargarSelectsAsignar();
 }
