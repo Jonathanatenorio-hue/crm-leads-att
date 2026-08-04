@@ -1065,7 +1065,7 @@ function render(){
   const ordF=$('sortLeads')?$('sortLeads').value:'reciente';
   if(ordF==='pendiente')rows.sort((a,b)=>ultAct(a)-ultAct(b));
   else if(ordF==='seguido')rows.sort((a,b)=>ultAct(b)-ultAct(a));
-  const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
+  const viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length,vent=dashVentas().length;
   const madur=LEADS.filter(l=>enMaduracion(l)).length;
   const esper=LEADS.filter(l=>enEsperaAcel(l)).length;
   const lanzN=LEADS.filter(l=>enEsperaLanz(l)).length;
@@ -1892,6 +1892,16 @@ function dashLeads(){
     if(DFILT.sup&&(SUPMAP?.[l.agentes?.nombre]||'')!==DFILT.sup)return false;
     return true;});
 }
+function dashVentas(){
+  const r=rangoFechas();
+  return LEADS.filter(l=>{
+    if(l.etapa!=='Venta exitosa')return false;
+    if(r){const f=diaLocal(l.fecha_venta||l.ultimo_movimiento);if(f<r[0]||f>r[1])return false;}
+    if(DFILT.camp&&(l.campanas?.nombre||'')!==DFILT.camp)return false;
+    if(DFILT.ag&&(l.agentes?.nombre||'')!==DFILT.ag)return false;
+    if(DFILT.sup&&(SUPMAP?.[l.agentes?.nombre]||'')!==DFILT.sup)return false;
+    return true;});
+}
 function dashRechazos(){
   const r=rangoFechas();
   if(DFILT.ag||DFILT.sup)return [];   // los rechazos no pertenecen a un agente
@@ -1931,7 +1941,7 @@ async function renderDashboard(){
   await cargarSupMap();
   ACEL_HIST=null;
   const LEADS=dashLeads(), RECHAZOS=dashRechazos();
-  const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
+  const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=dashVentas().length;
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length;
   const rech=RECHAZOS.length;
   const madurando=LEADS.filter(l=>enMaduracion(l)).length;
@@ -2207,8 +2217,10 @@ function tablaAgente(){
     if(l.viabilidad==='VIABLE')a.viab++;
     else if(l.viabilidad==='NO VIABLE'){if(l.adeudo==='Sí')a.nvAd++;else a.nvRe++;}
     else a.def++;
-    if(l.etapa==='Venta exitosa')a.vent++;
     a.adeudo+=(l.monto_adeudo||0);});
+  dashVentas().forEach(l=>{const n=l.agentes?.nombre||'—';
+    const a=A[n]=A[n]||{leads:0,viab:0,mad:0,esp:0,lanz:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0};
+    a.vent++;});
   const rows=Object.entries(A).map(([n,o])=>[n,o.leads,o.viab,o.mad,o.esp,o.lanz,o.nvAd,o.nvRe,o.nvAd+o.nvRe,o.def,o.vent,pc(o.viab,o.leads),pc(o.vent,Math.max(o.viab-o.mad-o.esp-o.lanz,0)),money(o.adeudo)]).sort((a,b)=>b[10]-a[10]||b[2]-a[2]);
   const T=Object.values(A).reduce((t,o)=>{t.leads+=o.leads;t.viab+=o.viab;t.mad+=o.mad;t.esp+=o.esp;t.lanz+=o.lanz;t.nvAd+=o.nvAd;t.nvRe+=o.nvRe;t.def+=o.def;t.vent+=o.vent;t.adeudo+=o.adeudo;return t;},{leads:0,viab:0,mad:0,esp:0,lanz:0,nvAd:0,nvRe:0,def:0,vent:0,adeudo:0});
   const totalRow=['TOTAL',T.leads,T.viab,T.mad,T.esp,T.lanz,T.nvAd,T.nvRe,T.nvAd+T.nvRe,T.def,T.vent,pc(T.viab,T.leads),pc(T.vent,Math.max(T.viab-T.mad-T.esp-T.lanz,0)),money(T.adeudo)];
@@ -2457,7 +2469,7 @@ function exportTabla(){
 async function generarInforme(){
   toast('Generando informe…');
   await cargarRechazos();
-  const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=LEADS.filter(l=>l.etapa==='Venta exitosa').length;
+  const total=LEADS.length, viab=LEADS.filter(l=>l.viabilidad==='VIABLE').length, vent=dashVentas().length;
   const noViab=LEADS.filter(l=>l.viabilidad==='NO VIABLE').length, rech=RECHAZOS.length;
   const _madur=LEADS.filter(l=>enMaduracion(l)).length;
   const _esp=LEADS.filter(l=>enEsperaAcel(l)).length;
