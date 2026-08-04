@@ -408,7 +408,8 @@ tbody tr:hover{background:#F7F8FF}
         <div class="field"><label>Plazo</label><select id="cotPlazo"></select></div>
       </div>
       <div class="row2">
-        <div class="field"><label>Enganche</label><select id="cotEng"><option value="0">Sin enganche</option><option value="10">10%</option><option value="20">20%</option><option value="30">30%</option><option value="50">50%</option></select></div>
+        <div class="field"><label>Enganche</label><select id="cotEng"><option value="0">Sin enganche</option><option value="5">5%</option><option value="10">10%</option><option value="20">20%</option><option value="30">30%</option><option value="40">40%</option><option value="50">50%</option><option value="60">60%</option><option value="70">70%</option><option value="__monto__">$ Monto exacto…</option></select></div>
+        <div class="field hidden" id="cotEngMontoW"><label>Monto de enganche ($)</label><input type="number" id="cotEngMonto" min="0" step="50" placeholder="Ej. 2000" autocomplete="off"></div>
         <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="cotAgregar" style="width:100%">+ Agregar</button></div>
       </div>
     </div>
@@ -2072,6 +2073,8 @@ async function renderDashboard(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
+  const _ce=$('cotEng');
+  if(_ce)_ce.addEventListener('change',()=>{$('cotEngMontoW').classList.toggle('hidden',_ce.value!=='__monto__');if(_ce.value==='__monto__')$('cotEngMonto').focus();});
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   const _rx=$('btnRepXls');if(_rx)_rx.onclick=exportTabla;
   const _lz=$('btnLzGuardar');if(_lz)_lz.onclick=async()=>{
@@ -4319,12 +4322,20 @@ function cotAgregarItem(){
     if(!confirm('Este equipo no tiene precio promocional en ese plan/plazo. ¿Cotizar a PRECIO DE LISTA ($'+(COT_DEV.precioContado||0).toLocaleString('es-MX')+')?'))return;
     precioPromo=COT_DEV.precioContado;
   }
-  const pct=parseInt($('cotEng').value)||0;
+  let pct, montoEng;
+  if($('cotEng').value==='__monto__'){
+    montoEng=Math.max(0,parseFloat($('cotEngMonto').value)||0);
+    if(!montoEng)return toast('Escribe el monto de enganche',false);
+    if(montoEng>=precioPromo)return toast('El enganche no puede ser igual o mayor al precio del equipo',false);
+    pct=Math.round(montoEng/precioPromo*1000)/10;   // % real con 1 decimal
+  }else{
+    pct=parseInt($('cotEng').value)||0;
+    montoEng=Math.round(precioPromo*pct/100*100)/100;
+  }
   state.items.push({id:Date.now()+Math.random(),equipo:COT_DEV.equipo,marca:COT_DEV.marca||'',
     precioLista:COT_DEV.precioContado,precioPromo:precioPromo,planId:planId,planNombre:plan.name,
-    planPrecio:plan.price,plazo:plazo,enganchePct:pct,enganche:Math.round(precioPromo*pct)/100*1,
+    planPrecio:plan.price,plazo:plazo,enganchePct:pct,enganche:montoEng,
     sinPromo:precioPromo===COT_DEV.precioContado&&!(COT_DEV.pricing[planId]?.[plazo]>=0)});
-  state.items[state.items.length-1].enganche=Math.round(precioPromo*pct/100*100)/100;
   cotRenderItems();
 }
 function cotAgregarSoloPlan(){
