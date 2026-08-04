@@ -2009,6 +2009,17 @@ async function renderDashboard(){
       </div>
       <div style="margin-top:8px"><input type="text" id="lzModelos" value="${(CFG.modelos_lanzamiento||'').replace(/"/g,'&quot;')}" placeholder="Modelos separados por coma" style="width:100%"><div class="hint" style="font-size:11.5px;margin-top:4px">Los modelos que los agentes verán en la lista, separados por coma. Agrega capacidades si quieres medirlas (ej. "iPhone 18 Pro Max 256GB, iPhone 18 Pro Max 512GB").</div></div>`:''}
     </div>
+    <div class="dash-card" style="margin-top:16px"><h3>📆 Ventas y leads por agente · fecha o rango</h3>
+      <div class="dc-sub">Elige un día (o rango) y genera el corte: ventas concretadas, leads recibidos y su clasificación.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <input type="date" id="repD1" value="${(()=>{const d=new Date();d.setDate(d.getDate()-1);return isoLocal(d);})()}">
+        <span class="muted-cell">al</span>
+        <input type="date" id="repD2" value="${(()=>{const d=new Date();d.setDate(d.getDate()-1);return isoLocal(d);})()}">
+        <button class="btn btn-primary" id="btnRepGen" style="white-space:nowrap">Generar</button>
+        <button class="btn btn-ghost hidden" id="btnRepXls" style="white-space:nowrap">⬇ Excel</button>
+      </div>
+      <div id="repFechasOut" style="margin-top:12px;overflow-x:auto"></div>
+    </div>
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
@@ -2048,6 +2059,8 @@ async function renderDashboard(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
+  const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
+  const _rx=$('btnRepXls');if(_rx)_rx.onclick=exportTabla;
   const _lz=$('btnLzGuardar');if(_lz)_lz.onclick=async()=>{
     const n=$('cfgLzNombre').value.trim(),f=$('cfgLzFecha').value;
     if(!n||!f)return toast('Captura nombre y fecha del lanzamiento',false);
@@ -2305,6 +2318,41 @@ function renderTablas(which){
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
   else if(which==='campana')c.innerHTML=tablaCampana();
   else c.innerHTML=tablaGlobal();
+}
+function generarRepFechas(){
+  const d1=$('repD1').value, d2=$('repD2').value||d1;
+  if(!d1)return toast('Elige la fecha',false);
+  const en=iso=>iso&&iso>=d1&&iso<=d2;
+  const A={};
+  LEADS.forEach(l=>{
+    const ag=l.agentes?.nombre||'—';
+    const o=A[ag]=A[ag]||{v:0,rec:0,via:0,ano:0,lanz:0,nvA:0,nvR:0};
+    if(l.etapa==='Venta exitosa'&&en(diaLocal(l.fecha_venta||l.ultimo_movimiento)))o.v++;
+    if(en(diaLocal(l.creado_en))){
+      o.rec++;
+      if(l.viabilidad==='VIABLE')o.via++;
+      if(l.etapa==='Interesado (sin cumplir año)')o.ano++;
+      if(l.etapa==='En espera de lanzamiento')o.lanz++;
+      if(l.viabilidad==='NO VIABLE'){
+        if(/adeudo/i.test(l.motivo_no_viable||''))o.nvA++; else o.nvR++;
+      }
+    }
+  });
+  const headers=['Agente','Centro','Ventas','Leads recibidos','Viables','🎂 Sin año','📱 Lanzam.','NV adeudo','NV renovó/cancel.'];
+  const rows=Object.entries(A)
+    .filter(([,o])=>o.v||o.rec)
+    .sort((a,b)=>b[1].v-a[1].v||b[1].rec-a[1].rec)
+    .map(([n,o])=>[n,CENTROMAP[n]||'—',o.v,o.rec,o.via,o.ano,o.lanz,o.nvA,o.nvR]);
+  const T=rows.reduce((t,r)=>{for(let i=2;i<9;i++)t[i]=(t[i]||0)+r[i];return t;},['TOTAL','']);
+  rows.push(T);
+  const titulo='Ventas y leads por agente · '+(d1===d2?d1:(d1+' a '+d2));
+  LAST_TABLA={name:titulo,headers,rows};
+  const out=$('repFechasOut');
+  out.innerHTML='<table class="atable"><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+
+    rows.map(r=>'<tr'+(r[0]==='TOTAL'?' style="font-weight:700;background:#FFF6ED"':'')+'>'+r.map((c,i)=>'<td'+(i>1?' style="text-align:center"':'')+'>'+c+'</td>').join('')+'</tr>').join('')+
+    '</tbody></table><div class="hint" style="font-size:11.5px;margin-top:6px">Ventas por fecha real de cierre (hora local). "Leads recibidos" y su clasificación: por fecha de registro, con su estado actual. Excluye archivados.</div>';
+  $('btnRepXls').classList.remove('hidden');
+  toast('Corte generado: '+rows.length+' filas');
 }
 function exportTabla(){
   let {headers,rows,name}=LAST_TABLA;
