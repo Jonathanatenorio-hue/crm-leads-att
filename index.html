@@ -787,7 +787,7 @@ async function login(){
 
 // ===== DATA =====
 async function cargarCampanas(){
-  const {data}=await db.from('campanas').select('id,nombre,mensajes_enviados').eq('activa',true).order('fecha_envio',{ascending:false});
+  const {data}=await db.from('campanas').select('id,nombre,fecha_envio,mensajes_enviados').eq('activa',true).order('fecha_envio',{ascending:false});
   CAMPANAS=data||[];const s=$('dCampana');s.innerHTML='<option value="">Selecciona…</option>';
   CAMPANAS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.nombre;s.appendChild(o);});
 }
@@ -1347,6 +1347,12 @@ async function guardar(){
 
   if(viable||st.adeudo==='Sí'){
     if(viable&&!st.etapa)return fail('Selecciona la tipificación.');
+    const _prevVenta=editId?(LEADS.find(x=>x.id===editId)||{}).etapa==='Venta exitosa':false;
+    if(st.etapa==='Venta exitosa'&&!_prevVenta){
+      const hoyBonito=new Date().toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long'});
+      if(!confirm('💰 Vas a registrar una VENTA con fecha oficial de HOY ('+hoyBonito+').\n\n⚠️ La fecha queda sellada y NO se puede cambiar después.\n\n¿Esta venta se cerró HOY?\n\n· Si se cerró otro día: CANCELA y avisa a tu supervisor/dirección ANTES de guardar.'))
+        return fail('Venta no registrada. Si se cerró otro día, repórtalo a dirección para registrarla con su fecha correcta.');
+    }
     if(!viable&&st.etapa&&!['Adeudo mensualidad','Lead caído'].includes(st.etapa))return fail('Con adeudo solo puedes tipificar Adeudo mensualidad o Lead caído.');
     if(st.etapa==='Adeudo mensualidad'&&st.adeudo!=='Sí')return fail('Para Adeudo mensualidad marca ¿Tiene adeudo? = Sí y captura el monto del mes.');
     if(st.etapa==='En espera de lanzamiento'){
@@ -1746,7 +1752,8 @@ function resumenCRM(){
     por_etapa:etapas,por_agente:porAgente,por_agente_etapa:porAgenteEtapa,por_dia_ultimos_30:dias30,
     leads_por_agente_por_dia_ultimos_14:agDia14,
     ventas_por_agente_por_dia_ultimos_14:agVenta14,por_campana:porCamp,
-    reglas_de_respuesta:'REGLAS ESTRICTAS: 1) Responde ÚNICAMENTE con números que estén literalmente en este JSON; NUNCA estimes, extrapoles ni inventes cifras. 2) Para ventas de un día específico usa ventas_por_agente_por_dia_ultimos_14 (la fecha de hoy es fecha_hoy; ayer es el día anterior). 3) Si preguntan por una fecha fuera de los últimos 14 días o un dato que no está aquí, responde exactamente: "No tengo ese dato en mi resumen — genera el corte exacto en la tarjeta 📆 Ventas y leads por agente del Dashboard." 4) Las ventas por agente en por_agente son ACUMULADAS históricas, no de un día. 5) Si un total y un desglose no cuadran, repórtalo en vez de ajustarlo.',
+    catalogo_campanas_lanzadas:CAMPANAS.map(c=>({nombre:c.nombre,fecha_lanzamiento:c.fecha_envio||null,mensajes_enviados:c.mensajes_enviados||0,leads_recibidos:(porCamp[c.nombre]?.leads)||0,ventas:(porCamp[c.nombre]?.ventas)||0})),
+    reglas_de_respuesta:'REGLAS ESTRICTAS: 1) Responde ÚNICAMENTE con números que estén literalmente en este JSON; NUNCA estimes, extrapoles ni inventes cifras. 2) Para ventas de un día específico usa ventas_por_agente_por_dia_ultimos_14 (la fecha de hoy es fecha_hoy; ayer es el día anterior). 2b) Para preguntas de campañas lanzadas usa catalogo_campanas_lanzadas filtrando por fecha_lanzamiento (NUNCA por el nombre de la campaña); mensajes_enviados es el dato de mensajes; si una campaña tiene mensajes_enviados=0 aclara que ese dato no está capturado. Cuenta y suma con cuidado: enumera y verifica el total antes de responder. 3) Si preguntan por una fecha fuera de los últimos 14 días o un dato que no está aquí, responde exactamente: "No tengo ese dato en mi resumen — genera el corte exacto en la tarjeta 📆 Ventas y leads por agente del Dashboard." 4) Las ventas por agente en por_agente son ACUMULADAS históricas, no de un día. 5) Si un total y un desglose no cuadran, repórtalo en vez de ajustarlo.',
     nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; apartados_lanzamiento=esperando preventa del equipo nuevo; al llegar sus fechas vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
 }
 function iaSeleccion(){
@@ -2073,8 +2080,6 @@ async function renderDashboard(){
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{usePointStyle:true,pointStyle:'circle',padding:16}}},scales:{x:{grid:{display:false}},y:{grid:{color:GRID},beginAtZero:true,ticks:{precision:0}}},animation:{duration:1100}}});
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
-  const _ce=$('cotEng');
-  if(_ce)_ce.addEventListener('change',()=>{$('cotEngMontoW').classList.toggle('hidden',_ce.value!=='__monto__');if(_ce.value==='__monto__')$('cotEngMonto').focus();});
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   const _rx=$('btnRepXls');if(_rx)_rx.onclick=exportTabla;
   const _lz=$('btnLzGuardar');if(_lz)_lz.onclick=async()=>{
@@ -2322,12 +2327,58 @@ function render_atable(headers,rows,totalRow){
   const tot=totalRow?'<tr class="total">'+totalRow.map(c=>`<td>${c}</td>`).join('')+'</tr>':'';
   return `<table class="atable"><thead><tr>${th}</tr></thead><tbody>${body}${tot}</tbody></table>`;
 }
+function valorOrden(txt){
+  const t=String(txt??'').replace(/[█▇▆▅▄▃▂▁,%$\s]/g,'').replace(/[^0-9.\-]/g,'');
+  const n=parseFloat(t);
+  return isNaN(n)?null:n;
+}
+function activarOrdenTablas(cont){
+  if(!cont)return;
+  cont.querySelectorAll('table.atable thead th').forEach(th=>{
+    th.style.cursor='pointer';th.title='Clic para ordenar';
+    th.onclick=()=>{
+      const table=th.closest('table'),tb=table.tBodies[0];if(!tb)return;
+      const idx=th.cellIndex;
+      const dir=th.dataset.dir==='desc'?'asc':'desc';
+      table.querySelectorAll('th').forEach(x=>{x.dataset.dir='';x.textContent=x.textContent.replace(/ [▲▼]$/,'');});
+      th.dataset.dir=dir;th.textContent=th.textContent.replace(/ [▲▼]$/,'')+(dir==='desc'?' ▼':' ▲');
+      const filas=[...tb.rows];
+      const fijas=filas.filter(r=>/^(TOTAL|Subtotal|▸)/.test((r.cells[0]?.textContent||'').trim()));
+      const movibles=filas.filter(r=>!fijas.includes(r));
+      movibles.sort((a,b)=>{
+        const ta=(a.cells[idx]?.textContent||'').trim(), tbx=(b.cells[idx]?.textContent||'').trim();
+        const na=valorOrden(ta), nb=valorOrden(tbx);
+        let cmp;
+        if(na!==null&&nb!==null)cmp=na-nb;
+        else cmp=ta.localeCompare(tbx,'es');
+        return dir==='desc'?-cmp:cmp;
+      });
+      movibles.forEach(r=>tb.appendChild(r));
+      fijas.forEach(r=>tb.appendChild(r));
+      // mantener el export alineado con lo que se ve
+      try{
+        if(LAST_TABLA&&LAST_TABLA.rows&&LAST_TABLA.headers&&table.tHead.rows[0].cells.length===LAST_TABLA.headers.length){
+          const fijasE=LAST_TABLA.rows.filter(r=>/^(TOTAL|Subtotal|▸)/.test(String(r[0])));
+          const movE=LAST_TABLA.rows.filter(r=>!fijasE.includes(r));
+          movE.sort((a,b)=>{
+            const na=valorOrden(a[idx]), nb=valorOrden(b[idx]);
+            let cmp;
+            if(na!==null&&nb!==null)cmp=na-nb;
+            else cmp=String(a[idx]??'').localeCompare(String(b[idx]??''),'es');
+            return dir==='desc'?-cmp:cmp;
+          });
+          LAST_TABLA.rows=[...movE,...fijasE];
+        }
+      }catch(e){}
+    };
+  });
+}
 function renderTablas(which){
   $('tbltabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.t===which));
   const c=$('tablaCont');
   if(which==='agente')c.innerHTML=tablaAgente();
   else if(which==='dia')c.innerHTML=tablaPorDia();
-  else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if(!$('tablaCont'))return;$('tablaCont').innerHTML=h;
+  else if(which==='acel'){c.innerHTML='<div class="dash-empty"><span class="loader"></span> Analizando aceleraciones…</div>';tablaAcel().then(h=>{if(!$('tablaCont'))return;$('tablaCont').innerHTML=h;activarOrdenTablas($('tablaCont'));
     $('tablaCont').querySelectorAll('.acelCard').forEach(cd=>cd.onclick=()=>{
       ACEL_SUB=cd.dataset.acel==='todas'?null:cd.dataset.acel;
       etSoltar(['Aceleración pendiente']);
@@ -2336,6 +2387,7 @@ function renderTablas(which){
   else if(which==='embudo')c.innerHTML=tablaEmbudo();
   else if(which==='campana')c.innerHTML=tablaCampana();
   else c.innerHTML=tablaGlobal();
+  activarOrdenTablas(c);
 }
 function generarRepFechas(){
   const d1=$('repD1').value, d2=$('repD2').value||d1;
@@ -2377,6 +2429,7 @@ function generarRepFechas(){
     (detRows.length?'<h4 style="margin:14px 0 6px">💰 Detalle de ventas ('+detRows.length+')</h4><table class="atable"><thead><tr><th>Agente</th><th>Teléfono</th><th>Cliente</th><th>Folio</th><th>Cierre</th></tr></thead><tbody>'+
       detRows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(String(c).includes('SIN FOLIO')?' style="color:var(--red);font-weight:600"':'')+'>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'');
   $('btnRepXls').classList.remove('hidden');
+  activarOrdenTablas(out);
   toast('Corte generado: '+rows.length+' filas');
 }
 function exportTabla(){
@@ -4478,6 +4531,7 @@ bindSeg('segFaltaQue',v=>{st.faltaQue=v;});
 bindSeg('segLinEq',v=>{st.linEq=v;$('lEquipoW').classList.toggle('hidden',v!=='Con equipo');});
 if($('snFecha'))$('snFecha').addEventListener('input',recalcSinAno);
 if($('lzEquipoSel'))$('lzEquipoSel').addEventListener('change',()=>{$('lzOtroW').classList.toggle('hidden',$('lzEquipoSel').value!=='__otro__');});
+if($('cotEng'))$('cotEng').addEventListener('change',()=>{$('cotEngMontoW').classList.toggle('hidden',$('cotEng').value!=='__monto__');if($('cotEng').value==='__monto__')$('cotEngMonto').focus();});
 $('dPrepago').addEventListener('change',recalcViab);
 $('aUltimaCuota').addEventListener('change',recalcAcel);$('aDiaCorte').addEventListener('input',recalcAcel);
 $('aEquipo').addEventListener('input',e=>{$('aAppsField').classList.toggle('hidden',!e.target.value.trim());});
