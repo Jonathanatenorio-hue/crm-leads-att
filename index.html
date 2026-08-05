@@ -2364,11 +2364,18 @@ function generarRepFechas(){
   const T=rows.reduce((t,r)=>{for(let i=2;i<9;i++)t[i]=(t[i]||0)+r[i];return t;},['TOTAL','']);
   rows.push(T);
   const titulo='Ventas y leads por agente · '+(d1===d2?d1:(d1+' a '+d2));
-  LAST_TABLA={name:titulo,headers,rows};
+  const detRows=LEADS
+    .filter(l=>l.etapa==='Venta exitosa'&&en(diaLocal(l.fecha_venta||l.ultimo_movimiento)))
+    .sort((a,b)=>(a.agentes?.nombre||'').localeCompare(b.agentes?.nombre||'')||new Date(a.fecha_venta||0)-new Date(b.fecha_venta||0))
+    .map(l=>[l.agentes?.nombre||'—',l.telefono||'',l.nombre||'—',l.folio_avs||'⚠️ SIN FOLIO',
+      l.fecha_venta?new Date(l.fecha_venta).toLocaleString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—']);
+  LAST_TABLA={name:titulo,headers,rows,detalle:{name:'Detalle de ventas',headers:['Agente','Teléfono','Cliente','Folio','Cierre (hora local)'],rows:detRows}};
   const out=$('repFechasOut');
   out.innerHTML='<table class="atable"><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+
     rows.map(r=>'<tr'+(r[0]==='TOTAL'?' style="font-weight:700;background:#FFF6ED"':'')+'>'+r.map((c,i)=>'<td'+(i>1?' style="text-align:center"':'')+'>'+c+'</td>').join('')+'</tr>').join('')+
-    '</tbody></table><div class="hint" style="font-size:11.5px;margin-top:6px">Ventas por fecha real de cierre (hora local). "Leads recibidos" y su clasificación: por fecha de registro, con su estado actual. Excluye archivados.</div>';
+    '</tbody></table><div class="hint" style="font-size:11.5px;margin-top:6px">Ventas por fecha real de cierre (hora local). "Leads recibidos" y su clasificación: por fecha de registro, con su estado actual. Excluye archivados.</div>'+
+    (detRows.length?'<h4 style="margin:14px 0 6px">💰 Detalle de ventas ('+detRows.length+')</h4><table class="atable"><thead><tr><th>Agente</th><th>Teléfono</th><th>Cliente</th><th>Folio</th><th>Cierre</th></tr></thead><tbody>'+
+      detRows.map(r=>'<tr>'+r.map((c,i)=>'<td'+(String(c).includes('SIN FOLIO')?' style="color:var(--red);font-weight:600"':'')+'>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'');
   $('btnRepXls').classList.remove('hidden');
   toast('Corte generado: '+rows.length+' filas');
 }
@@ -2466,6 +2473,19 @@ function exportTabla(){
     }
   }
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));
+  const det=LAST_TABLA.detalle;
+  if(det&&det.rows&&det.rows.length){
+    const aoa2=[[det.name.toUpperCase()],[''],det.headers,...det.rows];
+    const ws2=XLSX.utils.aoa_to_sheet(aoa2);
+    ws2['!cols']=det.headers.map((h,c)=>({wch:Math.min(Math.max(String(h).length+2,...aoa2.slice(3).map(r=>String(r[c]??'').length+2)),34)}));
+    for(let R=0;R<aoa2.length;R++)for(let C=0;C<det.headers.length;C++){
+      const ref=XLSX.utils.encode_cell({r:R,c:C});const cell=ws2[ref];if(!cell)continue;
+      if(R===0)cell.s={font:{name:'Arial',bold:true,sz:13,color:{rgb:NAVY}}};
+      else if(R===2)cell.s={font:{name:'Arial',bold:true,sz:9,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:NAVY}},alignment:{horizontal:'center'}};
+      else cell.s={font:{name:'Arial',sz:9,color:{rgb:String(aoa2[R][3]||'').includes('SIN FOLIO')&&C===3?'B91C1C':'1F2937'},bold:String(aoa2[R][3]||'').includes('SIN FOLIO')&&C===3},fill:(R%2===1?{fgColor:{rgb:GRIS}}:undefined),alignment:{horizontal:C===0||C===2?'left':'center'},border:{bottom:borde}};
+    }
+    XLSX.utils.book_append_sheet(wb,ws2,'Detalle de ventas');
+  }
   XLSX.writeFile(wb,name+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
   toast('📊 Excel con formato descargado');
 }
