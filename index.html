@@ -752,7 +752,7 @@ async function entrarApp(session){
     ES_STAFF=true;
     document.querySelectorAll('.col-agente').forEach(el=>el.classList.remove('hidden'));
     show($('filterAgenteWrap'));
-    $('tabDashboard').classList.toggle('hidden',!['director','supervisor'].includes(agente.rol));
+    $('tabDashboard').classList.toggle('hidden',!['director','supervisor','coordinador'].includes(agente.rol));
     $('tabAsignar').classList.toggle('hidden',!['director','depurador'].includes(agente.rol));
     $('tabLanzamientos').classList.toggle('hidden',agente.rol!=='director');
     if(agente.rol==='depurador'){
