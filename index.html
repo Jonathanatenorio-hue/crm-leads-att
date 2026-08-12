@@ -810,10 +810,11 @@ async function cargarLeads(){
     EQUIPO_IDS=AGPORID?Object.entries(AGPORID).filter(([,v])=>v.supervisor===AGENTE.nombre).map(([id])=>parseInt(id)):[];
     if(!EQUIPO_IDS.length)EQUIPO_IDS=[-1];   // sin equipo asignado → no ve leads
   }
-  // coordinador: todos los agentes de SU centro
+  // coordinador: los agentes de SUS supervisores (organigrama); respaldo: su centro
   if(AGENTE.rol==='coordinador'){
     try{await cargarSupMap();}catch(e){}
-    EQUIPO_IDS=AGPORID?Object.entries(AGPORID).filter(([,v])=>v.centro===(AGENTE.centro||'__none__')).map(([id])=>parseInt(id)):[];
+    const misSups=Object.keys(SUPCOORD||{}).filter(s=>SUPCOORD[s]===AGENTE.nombre);
+    EQUIPO_IDS=AGPORID?Object.entries(AGPORID).filter(([,v])=>misSups.length?misSups.includes(v.supervisor):v.centro===(AGENTE.centro||'__none__')).map(([id])=>parseInt(id)):[];
     if(!EQUIPO_IDS.length)EQUIPO_IDS=[-1];
   }
   while(true){
@@ -1971,14 +1972,16 @@ function dashRechazos(){
 function hayFiltro(){return DFILT.per!=='todo'||DFILT.sup||DFILT.ag||DFILT.camp;}
 function filtroBarHTML(){
   const ags=[...new Set(LEADS.map(l=>l.agentes?.nombre).filter(Boolean))].sort();
-  const sups=SUPMAP?[...new Set(Object.values(SUPMAP))].sort():[];
+  const sups=AGENTE.rol==='director'
+    ?(SUPMAP?[...new Set(Object.values(SUPMAP))].sort():[])
+    :[...new Set(LEADS.map(l=>SUPMAP?.[l.agentes?.nombre]).filter(Boolean))].sort();
   const camps=[...new Set(LEADS.map(l=>l.campanas?.nombre).filter(Boolean))].sort();
   const opt=(v,sel,txt)=>`<option value="${v}"${v===sel?' selected':''}>${txt||v}</option>`;
   return `<div class="dash-card" style="margin-bottom:16px"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
     <div class="field" style="min-width:160px;flex:1"><label>Periodo</label><select id="dfPer">${opt('todo',DFILT.per,'Todo el histórico')}${opt('hoy',DFILT.per,'Hoy')}${opt('7d',DFILT.per,'Últimos 7 días')}${opt('14d',DFILT.per,'Últimos 14 días')}${opt('mes',DFILT.per,'Este mes')}${opt('mesant',DFILT.per,'Mes anterior')}${opt('rango',DFILT.per,'Rango de fechas…')}</select></div>
     <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD1w"><label>Del</label><input type="date" id="dfD1" value="${DFILT.d1}"></div>
     <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD2w"><label>Al</label><input type="date" id="dfD2" value="${DFILT.d2}"></div>
-    <div class="field" style="min-width:140px;flex:1"><label>Coordinador</label><select id="dfCoord"><option value="">Todos</option>${[...new Set(Object.values(SUPCOORD))].sort().map(c=>opt(c,DFILT.coord)).join('')}</select></div>
+    ${AGENTE.rol==='director'?`<div class="field" style="min-width:140px;flex:1"><label>Coordinador</label><select id="dfCoord"><option value="">Todos</option>${[...new Set(Object.values(SUPCOORD))].sort().map(c=>opt(c,DFILT.coord)).join('')}</select></div>`:''}
     <div class="field" style="min-width:150px;flex:1"><label>Supervisor</label><select id="dfSup"><option value="">Todos</option>${(DFILT.coord?sups.filter(s=>SUPCOORD[s]===DFILT.coord):sups).map(s=>opt(s,DFILT.sup)).join('')}</select></div>
     <div class="field" style="min-width:150px;flex:1"><label>Agente</label><select id="dfAg"><option value="">Todos</option>${ags.map(a=>opt(a,DFILT.ag)).join('')}</select></div>
     <div class="field" style="min-width:170px;flex:1"><label>Campaña</label><select id="dfCamp"><option value="">Todas</option>${camps.map(c=>opt(c,DFILT.camp)).join('')}</select></div>
@@ -1990,7 +1993,7 @@ function wireFiltrosDash(){
   $('dfD1').onchange=e=>{DFILT.d1=e.target.value;if(DFILT.d2)renderDashboard();};
   $('dfD2').onchange=e=>{DFILT.d2=e.target.value;if(DFILT.d1)renderDashboard();};
   $('dfSup').onchange=e=>{DFILT.sup=e.target.value;renderDashboard();};
-  $('dfCoord').onchange=e=>{DFILT.coord=e.target.value;if(DFILT.sup&&SUPCOORD[DFILT.sup]!==DFILT.coord)DFILT.sup='';renderDashboard();};
+  const _dfc=$('dfCoord');if(_dfc)_dfc.onchange=e=>{DFILT.coord=e.target.value;if(DFILT.sup&&SUPCOORD[DFILT.sup]!==DFILT.coord)DFILT.sup='';renderDashboard();};
   $('dfAg').onchange=e=>{DFILT.ag=e.target.value;renderDashboard();};
   $('dfCamp').onchange=e=>{DFILT.camp=e.target.value;renderDashboard();};
   $('dfLimpiar').onclick=()=>{DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:'',coord:''};renderDashboard();};
@@ -2102,15 +2105,18 @@ async function renderDashboard(){
     </div>
     ${(()=>{try{
       const LIC=30;
-      const act=Object.values(AGPORID||{}).filter(a=>a.rol==='agente'&&a.activo);
+      const esDir=AGENTE.rol==='director';
+      if(!esDir&&AGENTE.rol!=='coordinador')return '';
+      const misSupsC=AGENTE.rol==='coordinador'?Object.keys(SUPCOORD||{}).filter(s=>SUPCOORD[s]===AGENTE.nombre):null;
+      const act=Object.values(AGPORID||{}).filter(a=>a.rol==='agente'&&a.activo&&(esDir||(misSupsC&&misSupsC.length?misSupsC.includes(a.supervisor):a.centro===AGENTE.centro)));
       if(!act.length)return '';
       const porSup={};act.forEach(a=>{const s=a.supervisor||'Sin supervisor';porSup[s]=(porSup[s]||0)+1;});
       const porCoord={};Object.entries(porSup).forEach(([s,n])=>{const c=SUPCOORD[s]||'—';(porCoord[c]=porCoord[c]||[]).push(s+' '+n);});
       const disp=LIC-act.length;
-      return `<div class="dash-card" style="margin-top:16px"><h3>👥 Plantilla activa · licencias iVentas</h3>
+      return `<div class="dash-card" style="margin-top:16px"><h3>👥 Plantilla activa${esDir?' · licencias iVentas':''}</h3>
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px">
-          <div style="font-size:34px;font-weight:800;color:${act.length>LIC?'#B91C1C':'var(--navy,#0B1E3D)'}">${act.length}<span style="font-size:16px;color:#9CA3AF">/${LIC}</span></div>
-          <div class="badge" style="background:${disp>0?'#D1FAE5;color:#065F46':(disp===0?'#FEF3C7;color:#92400E':'#FEE2E2;color:#991B1B')};padding:4px 12px;font-size:12px">${disp>0?disp+' licencia'+(disp>1?'s':'')+' disponible'+(disp>1?'s':''):(disp===0?'Cupo lleno':'⚠️ '+(-disp)+' de MÁS — revisar')}</div>
+          <div style="font-size:34px;font-weight:800;color:${esDir&&act.length>LIC?'#B91C1C':'var(--navy,#0B1E3D)'}">${act.length}${esDir?`<span style="font-size:16px;color:#9CA3AF">/${LIC}</span>`:`<span style="font-size:14px;color:#9CA3AF"> agentes activos</span>`}</div>
+          ${esDir?`<div class="badge" style="background:${disp>0?'#D1FAE5;color:#065F46':(disp===0?'#FEF3C7;color:#92400E':'#FEE2E2;color:#991B1B')};padding:4px 12px;font-size:12px">${disp>0?disp+' licencia'+(disp>1?'s':'')+' disponible'+(disp>1?'s':''):(disp===0?'Cupo lleno':'⚠️ '+(-disp)+' de MÁS — revisar')}</div>`:''}
         </div>
         <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">
           ${Object.entries(porCoord).sort().map(([c,sups])=>`<div><b>${c}</b>: ${sups.sort().join(' · ')}</div>`).join('')}
