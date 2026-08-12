@@ -1614,7 +1614,7 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
-let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, cargaFilas=null, rzFilas=null;
+let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, SUPCOORD={}, cargaFilas=null, rzFilas=null;
 // Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
 function resolverAgente(txt){
   const q=norm(txt);
@@ -1910,20 +1910,20 @@ function wireAsistente(){
   $('aiEnviar').onclick=()=>preguntarCRM(inp.value);
   document.querySelectorAll('.aiChip').forEach(b=>b.onclick=()=>preguntarCRM(b.textContent));
 }
-let DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};
+let DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:'',coord:''};
 let SUPMAP=null, AGPORID=null;   // agente → supervisor / id → {nombre, supervisor}
 async function cargarSupMap(){
   if(SUPMAP)return;
   SUPMAP={};
   try{
     const [{data:ags},{data:sups}]=await Promise.all([
-      db.from('agentes').select('id,nombre,supervisor_id,centro'),
-      db.from('supervisores').select('id,nombre')]);
-    const S={};(sups||[]).forEach(s=>S[s.id]=s.nombre);
+      db.from('agentes').select('id,nombre,supervisor_id,centro,rol,activo'),
+      db.from('supervisores').select('id,nombre,coordinador')]);
+    const S={};SUPCOORD={};(sups||[]).forEach(s=>{S[s.id]=s.nombre;if(s.coordinador)SUPCOORD[s.nombre]=s.coordinador;});
     CENTROMAP={};(ags||[]).forEach(a=>{if(a.centro)CENTROMAP[a.nombre]=a.centro;});
     AGPORID={};
     (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];
-      AGPORID[a.id]={nombre:a.nombre,supervisor:S[a.supervisor_id]||null,centro:a.centro||null};});
+      AGPORID[a.id]={nombre:a.nombre,supervisor:S[a.supervisor_id]||null,centro:a.centro||null,rol:a.rol,activo:a.activo};});
   }catch(e){}
 }
 function rangoFechas(){
@@ -1946,6 +1946,7 @@ function dashLeads(){
     if(DFILT.camp&&(l.campanas?.nombre||'')!==DFILT.camp)return false;
     if(DFILT.ag&&(l.agentes?.nombre||'')!==DFILT.ag)return false;
     if(DFILT.sup&&(SUPMAP?.[l.agentes?.nombre]||'')!==DFILT.sup)return false;
+    if(DFILT.coord&&(SUPCOORD[SUPMAP?.[l.agentes?.nombre]]||'')!==DFILT.coord)return false;
     return true;});
 }
 function dashVentas(){
@@ -1956,6 +1957,7 @@ function dashVentas(){
     if(DFILT.camp&&(l.campanas?.nombre||'')!==DFILT.camp)return false;
     if(DFILT.ag&&(l.agentes?.nombre||'')!==DFILT.ag)return false;
     if(DFILT.sup&&(SUPMAP?.[l.agentes?.nombre]||'')!==DFILT.sup)return false;
+    if(DFILT.coord&&(SUPCOORD[SUPMAP?.[l.agentes?.nombre]]||'')!==DFILT.coord)return false;
     return true;});
 }
 function dashRechazos(){
@@ -1976,7 +1978,8 @@ function filtroBarHTML(){
     <div class="field" style="min-width:160px;flex:1"><label>Periodo</label><select id="dfPer">${opt('todo',DFILT.per,'Todo el histórico')}${opt('hoy',DFILT.per,'Hoy')}${opt('7d',DFILT.per,'Últimos 7 días')}${opt('14d',DFILT.per,'Últimos 14 días')}${opt('mes',DFILT.per,'Este mes')}${opt('mesant',DFILT.per,'Mes anterior')}${opt('rango',DFILT.per,'Rango de fechas…')}</select></div>
     <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD1w"><label>Del</label><input type="date" id="dfD1" value="${DFILT.d1}"></div>
     <div class="field${DFILT.per==='rango'?'':' hidden'}" id="dfD2w"><label>Al</label><input type="date" id="dfD2" value="${DFILT.d2}"></div>
-    <div class="field" style="min-width:150px;flex:1"><label>Supervisor</label><select id="dfSup"><option value="">Todos</option>${sups.map(s=>opt(s,DFILT.sup)).join('')}</select></div>
+    <div class="field" style="min-width:140px;flex:1"><label>Coordinador</label><select id="dfCoord"><option value="">Todos</option>${[...new Set(Object.values(SUPCOORD))].sort().map(c=>opt(c,DFILT.coord)).join('')}</select></div>
+    <div class="field" style="min-width:150px;flex:1"><label>Supervisor</label><select id="dfSup"><option value="">Todos</option>${(DFILT.coord?sups.filter(s=>SUPCOORD[s]===DFILT.coord):sups).map(s=>opt(s,DFILT.sup)).join('')}</select></div>
     <div class="field" style="min-width:150px;flex:1"><label>Agente</label><select id="dfAg"><option value="">Todos</option>${ags.map(a=>opt(a,DFILT.ag)).join('')}</select></div>
     <div class="field" style="min-width:170px;flex:1"><label>Campaña</label><select id="dfCamp"><option value="">Todas</option>${camps.map(c=>opt(c,DFILT.camp)).join('')}</select></div>
     <button class="btn btn-ghost" id="dfLimpiar"${hayFiltro()?'':' disabled'}>✕ Limpiar</button>
@@ -1987,9 +1990,10 @@ function wireFiltrosDash(){
   $('dfD1').onchange=e=>{DFILT.d1=e.target.value;if(DFILT.d2)renderDashboard();};
   $('dfD2').onchange=e=>{DFILT.d2=e.target.value;if(DFILT.d1)renderDashboard();};
   $('dfSup').onchange=e=>{DFILT.sup=e.target.value;renderDashboard();};
+  $('dfCoord').onchange=e=>{DFILT.coord=e.target.value;if(DFILT.sup&&SUPCOORD[DFILT.sup]!==DFILT.coord)DFILT.sup='';renderDashboard();};
   $('dfAg').onchange=e=>{DFILT.ag=e.target.value;renderDashboard();};
   $('dfCamp').onchange=e=>{DFILT.camp=e.target.value;renderDashboard();};
-  $('dfLimpiar').onclick=()=>{DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:''};renderDashboard();};
+  $('dfLimpiar').onclick=()=>{DFILT={per:'todo',d1:'',d2:'',sup:'',ag:'',camp:'',coord:''};renderDashboard();};
 }
 async function renderDashboard(){
   const D=$('dashboard');
@@ -2096,6 +2100,23 @@ async function renderDashboard(){
         <button class="btn btn-ghost" id="btnRankFull" style="border:1.5px solid var(--line)">📋 Ranking completo</button>
       </div>
     </div>
+    ${(()=>{try{
+      const LIC=30;
+      const act=Object.values(AGPORID||{}).filter(a=>a.rol==='agente'&&a.activo);
+      if(!act.length)return '';
+      const porSup={};act.forEach(a=>{const s=a.supervisor||'Sin supervisor';porSup[s]=(porSup[s]||0)+1;});
+      const porCoord={};Object.entries(porSup).forEach(([s,n])=>{const c=SUPCOORD[s]||'—';(porCoord[c]=porCoord[c]||[]).push(s+' '+n);});
+      const disp=LIC-act.length;
+      return `<div class="dash-card" style="margin-top:16px"><h3>👥 Plantilla activa · licencias iVentas</h3>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <div style="font-size:34px;font-weight:800;color:${act.length>LIC?'#B91C1C':'var(--navy,#0B1E3D)'}">${act.length}<span style="font-size:16px;color:#9CA3AF">/${LIC}</span></div>
+          <div class="badge" style="background:${disp>0?'#D1FAE5;color:#065F46':(disp===0?'#FEF3C7;color:#92400E':'#FEE2E2;color:#991B1B')};padding:4px 12px;font-size:12px">${disp>0?disp+' licencia'+(disp>1?'s':'')+' disponible'+(disp>1?'s':''):(disp===0?'Cupo lleno':'⚠️ '+(-disp)+' de MÁS — revisar')}</div>
+        </div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+          ${Object.entries(porCoord).sort().map(([c,sups])=>`<div><b>${c}</b>: ${sups.sort().join(' · ')}</div>`).join('')}
+        </div>
+      </div>`;
+    }catch(e){return '';}})()}
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
@@ -2191,7 +2212,7 @@ async function reciclar(){
 }
 
 let LAST_TABLA={headers:[],rows:[],name:'tabla'};
-const ETAPAS_CRM=['Venta exitosa','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Lead caído','Sin trabajar'];
+const ETAPAS_CRM=['Inicio de negociación','Adeudo mensualidad','Interesado (sin cumplir año)','En espera de lanzamiento','Cotización enviada','Aceleración pendiente','Falta INE o biométrico','Falta contrato firmado','Falta pago inicial','Línea adicional','Venta exitosa','Lead caído'];
 function pc(n,d){return d>0?Math.round(n/d*100)+'%':'0%';}
 function money(n){return '$'+(n||0).toLocaleString('es-MX',{maximumFractionDigits:0});}
 
@@ -2297,10 +2318,11 @@ function tablaEmbudo(){
   const LEADS=dashLeads();
   const A={};
   LEADS.filter(l=>l.viabilidad==='VIABLE').forEach(l=>{const n=l.agentes?.nombre||'—';const a=A[n]=A[n]||{viab:0,et:{}};a.viab++;const e=l.etapa||'Sin trabajar';a.et[e]=(a.et[e]||0)+1;});
-  const headers=['Agente','Viables',...ETAPAS_CRM.flatMap(e=>[e,'%'])];
-  const rows=Object.entries(A).map(([n,o])=>{const r=[n,o.viab];ETAPAS_CRM.forEach(e=>{const c=o.et[e]||0;r.push(c,pc(c,o.viab));});return r;}).sort((a,b)=>b[1]-a[1]);
-  const T={viab:0,et:{}};Object.values(A).forEach(o=>{T.viab+=o.viab;ETAPAS_CRM.forEach(e=>T.et[e]=(T.et[e]||0)+(o.et[e]||0));});
-  const totalRow=['TOTAL',T.viab,...ETAPAS_CRM.flatMap(e=>[T.et[e]||0,pc(T.et[e]||0,T.viab)])];
+  const ETF=['Sin trabajar',...ETAPAS_CRM];   // TODAS las cubetas: la suma de columnas = Viables
+  const headers=['Agente','Viables',...ETF.flatMap(e=>[e,'%'])];
+  const rows=Object.entries(A).map(([n,o])=>{const r=[n,o.viab];ETF.forEach(e=>{const c=o.et[e]||0;r.push(c,pc(c,o.viab));});return r;}).sort((a,b)=>b[1]-a[1]);
+  const T={viab:0,et:{}};Object.values(A).forEach(o=>{T.viab+=o.viab;ETF.forEach(e=>T.et[e]=(T.et[e]||0)+(o.et[e]||0));});
+  const totalRow=['TOTAL',T.viab,...ETF.flatMap(e=>[T.et[e]||0,pc(T.et[e]||0,T.viab)])];
   LAST_TABLA={headers,rows:[...rows,totalRow],name:'Embudo_por_agente'};
   return render_atable(headers,rows,totalRow);
 }
