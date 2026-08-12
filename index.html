@@ -1615,7 +1615,7 @@ function setSeccion(s){
   $('btnNuevo').classList.toggle('hidden',s!=='operacion');
   if(s==='dashboard') renderDashboard();
 }
-let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, SUPCOORD={}, cargaFilas=null, rzFilas=null;
+let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, SUPCOORD={}, CAIDOS_DIA={}, cargaFilas=null, rzFilas=null;
 // Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
 function resolverAgente(txt){
   const q=norm(txt);
@@ -1800,9 +1800,10 @@ function resumenCRM(){
   return {fecha_hoy:hoy,total_leads:LEADS.length,total_rechazos:(RECHAZOS||[]).length,
     por_etapa:etapas,por_agente:porAgente,por_agente_etapa:porAgenteEtapa,por_dia_ultimos_30:dias30,
     leads_por_agente_por_dia_ultimos_14:agDia14,
-    ventas_por_agente_por_dia_ultimos_14:agVenta14,por_campana:porCamp,
+    ventas_por_agente_por_dia_ultimos_14:agVenta14,
+    caidos_tipificados_por_dia_ultimos_14:CAIDOS_DIA,por_campana:porCamp,
     catalogo_campanas_lanzadas:CAMPANAS.map(c=>({nombre:c.nombre,fecha_lanzamiento:c.fecha_envio||null,mensajes_enviados:c.mensajes_enviados||0,leads_recibidos:(porCamp[c.nombre]?.leads)||0,ventas:(porCamp[c.nombre]?.ventas)||0})),
-    reglas_de_respuesta:'REGLAS ESTRICTAS: 1) Responde ÚNICAMENTE con números que estén literalmente en este JSON; NUNCA estimes, extrapoles ni inventes cifras. 2) Para ventas de un día específico usa ventas_por_agente_por_dia_ultimos_14 (la fecha de hoy es fecha_hoy; ayer es el día anterior). 2b) Para preguntas de campañas lanzadas usa catalogo_campanas_lanzadas filtrando por fecha_lanzamiento (NUNCA por el nombre de la campaña); mensajes_enviados es el dato de mensajes; si una campaña tiene mensajes_enviados=0 aclara que ese dato no está capturado. Cuenta y suma con cuidado: enumera y verifica el total antes de responder. 3) Si preguntan por una fecha fuera de los últimos 14 días o un dato que no está aquí, responde exactamente: "No tengo ese dato en mi resumen — genera el corte exacto en la tarjeta 📆 Ventas y leads por agente del Dashboard." 4) Las ventas por agente en por_agente son ACUMULADAS históricas, no de un día. 5) Si un total y un desglose no cuadran, repórtalo en vez de ajustarlo.',
+    reglas_de_respuesta:'REGLAS ESTRICTAS: 1) Responde ÚNICAMENTE con números que estén literalmente en este JSON; NUNCA estimes, extrapoles ni inventes cifras. 2) Para ventas de un día específico usa ventas_por_agente_por_dia_ultimos_14 (la fecha de hoy es fecha_hoy; ayer es el día anterior). 2c) Para leads caídos tipificados en un día usa caidos_tipificados_por_dia_ultimos_14 (fecha en que se tipificó la caída, por agente). 2b) Para preguntas de campañas lanzadas usa catalogo_campanas_lanzadas filtrando por fecha_lanzamiento (NUNCA por el nombre de la campaña); mensajes_enviados es el dato de mensajes; si una campaña tiene mensajes_enviados=0 aclara que ese dato no está capturado. Cuenta y suma con cuidado: enumera y verifica el total antes de responder. 3) Si preguntan por una fecha fuera de los últimos 14 días o un dato que no está aquí, responde exactamente: "No tengo ese dato en mi resumen — genera el corte exacto en la tarjeta 📆 Ventas y leads por agente del Dashboard." 4) Las ventas por agente en por_agente son ACUMULADAS históricas, no de un día. 5) Si un total y un desglose no cuadran, repórtalo en vez de ajustarlo.',
     nota:'viables=adeudo No y renovable Sí; conversión=ventas/(viables-madurando-esperando_corte); madurando=sin cumplir año; esperando_corte=aceleraciones con fecha subible futura; apartados_lanzamiento=esperando preventa del equipo nuevo; al llegar sus fechas vuelven a contar como vendibles; los rechazos pertenecen a campañas, no a agentes'};
 }
 function iaSeleccion(){
@@ -1894,6 +1895,13 @@ async function preguntarCRM(q){
   hist.innerHTML+=`<div style="padding:10px 14px;border-radius:12px;max-width:85%;align-self:flex-end;background:var(--brand,#4F46E5);color:#fff;font-size:13.5px">${q}</div><div id="aiWait" style="align-self:flex-start;padding:10px 14px;background:var(--bg-soft,#F3F4F6);border-radius:12px"><span class="loader"></span></div>`;
   hist.scrollTop=hist.scrollHeight;$('aiPregunta').value='';
   try{
+    try{
+      const desde14=new Date(Date.now()-14*864e5).toISOString();
+      const {data:bc}=await db.from('bitacora_movimientos').select('lead_id,creado_en').eq('etapa_nueva','Lead caído').gte('creado_en',desde14).limit(3000);
+      const AGL={};LEADS.forEach(l=>AGL[l.id]=l.agentes?.nombre||'—');
+      CAIDOS_DIA={};
+      (bc||[]).forEach(m=>{const d=diaLocal(m.creado_en);const ag=AGL[m.lead_id]||'—';(CAIDOS_DIA[d]=CAIDOS_DIA[d]||{})[ag]=(CAIDOS_DIA[d][ag]||0)+1;});
+    }catch(e){CAIDOS_DIA={};}
     const {data,error}=await db.functions.invoke('asistente-crm',{body:{pregunta:q,resumen:resumenCRM()}});
     if(error)throw error;
     if(data?.error)throw new Error(data.error);
