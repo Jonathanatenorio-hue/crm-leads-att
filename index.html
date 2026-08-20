@@ -899,6 +899,36 @@ function iniciarAlertasCaidos(){
         mostrarAlertaCaido(l,ag?ag.nombre:'',motivo);
       }).subscribe();
   }catch(e){}
+  iniciarAutoRefresco();
+}
+let _REFRESCANDO=false,_ULTIMO_REFRESCO=0,_RT_PENDIENTE=false;
+async function refrescarDatos(fuente){
+  // No interrumpir al que está capturando
+  if($('drawer')&&$('drawer').classList.contains('open')){_RT_PENDIENTE=true;return;}
+  if(_REFRESCANDO)return;
+  const ahora=Date.now();
+  if(ahora-_ULTIMO_REFRESCO<8000)return;   // amortiguador: máximo un refresco cada 8s
+  _REFRESCANDO=true;_ULTIMO_REFRESCO=ahora;_RT_PENDIENTE=false;
+  try{
+    await cargarLeads();
+    const dashVisible=$('seccion-dashboard')&&!$('seccion-dashboard').classList.contains('hidden');
+    if(dashVisible){try{renderDashboard();}catch(e){}}
+    else{try{render();}catch(e){}}
+  }catch(e){}
+  _REFRESCANDO=false;
+}
+function iniciarAutoRefresco(){
+  try{
+    // 1. Cambios en vivo: cualquier alta/edición de leads refresca la vista
+    db.channel('rt-vivo')
+      .on('postgres_changes',{event:'*',schema:'public',table:'leads'},()=>{refrescarDatos('realtime');})
+      .subscribe();
+  }catch(e){}
+  // 2. Al volver a la pestaña: datos frescos al instante
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refrescarDatos('foco');});
+  window.addEventListener('focus',()=>refrescarDatos('foco'));
+  // 3. Latido de respaldo cada 3 minutos (por si realtime se durmió)
+  setInterval(()=>refrescarDatos('latido'),180000);
 }
 let RT_LOG=[];
 function mostrarAlertaCaido(l,agNombre,motivo){
@@ -1369,7 +1399,7 @@ function abrirDrawer(lead){
   if(lead){show($('secHistorial'));cargarHistorial(lead.id);}else hide($('secHistorial'));
   $('overlay').classList.add('open');$('drawer').classList.add('open');
 }
-function cerrarDrawer(){$('overlay').classList.remove('open');$('drawer').classList.remove('open');}
+function cerrarDrawer(){$('overlay').classList.remove('open');$('drawer').classList.remove('open');if(_RT_PENDIENTE)setTimeout(()=>refrescarDatos('post-drawer'),400);}
 
 // ===== GUARDAR =====
 async function guardar(){
