@@ -462,7 +462,7 @@ tbody tr:hover{background:#F7F8FF}
     <!-- Registro -->
     <div class="sec" id="secRegistro">
       <div class="sec-title"><span class="n">1</span>Registro</div>
-      <div class="field"><label>Campaña</label><select id="dCampana"><option value="">Selecciona…</option></select></div>
+      <div class="field"><label>Campaña</label><select id="dCampana"><option value="">Selecciona…</option></select><div id="dCampAuto" class="hint hidden" style="font-size:11.5px;margin-top:4px;color:#065F46">📡 Campaña detectada del envío — asignada automáticamente</div></div>
       <div class="field hidden" id="dAgenteW"><label>👤 Asignado a (reasignar)</label><select id="dAgente"></select><div class="hint" style="font-size:11.5px">Al guardar, el lead pasa a la cartera del agente elegido con todo su historial.</div></div>
       <div class="row2">
         <div class="field"><label>Teléfono</label><input id="dTel" type="text" placeholder="Pega de iVentas (+521…) o 10 dígitos"><div class="hint" id="dTelHint"></div></div>
@@ -1325,6 +1325,7 @@ function abrirDrawer(lead){
   $('drTitle').textContent=lead?'Editar lead':'Nuevo lead';
   $('drSub').textContent=lead?(lead.telefono+' · '+(lead.nombre||'sin nombre')):'Registra y clasifica el lead paso a paso';
   // reset campos
+  $('dCampana').disabled=false;const _ca=$('dCampAuto');if(_ca)_ca.classList.add('hidden');
   $('dCampana').value=lead?.campana_id||'';$('dTel').value=lead?.telefono||'';$('dNombre').value=lead?.nombre||'';
   $('dMontoAdeudo').value=lead?.monto_adeudo||'';$('dFechaRenovo').value=lead?.fecha_renovo||'';$('dPrepago').checked=lead?.linea_prepago||false;
   ['segAdeudo','segRenovar','segIne','segFaltaQue'].forEach(s=>$(s).querySelectorAll('button').forEach(b=>b.className=''));
@@ -1438,10 +1439,36 @@ async function guardar(){
     if(st.etapa==='Falta contrato firmado'){if(!$('cFechaFirma').value)return fail('Pon la fecha compromiso de firma.');o.fecha_compromiso_firma=$('cFechaFirma').value;}
     if(st.etapa==='Falta pago inicial'){if(!(parseFloat($('pMonto').value)>0)||!$('pFecha').value)return fail('Captura monto y fecha del pago inicial.');o.pago_inicial_monto=parseFloat($('pMonto').value);o.pago_inicial_fecha=$('pFecha').value;}
     if(st.etapa==='Venta exitosa'){if(!$('vFolio').value.trim())return fail('Captura el folio AVS.');o.folio_avs=$('vFolio').value.trim();}
-    if(st.etapa==='Lead caído'){if(!$('kMotivo').value)return fail('Selecciona el motivo de la caída.');o.motivo_caida_id=parseInt($('kMotivo').value);o.comentarios=$('kComent').value.trim()||null;}
+    if(st.etapa==='Lead caído'){
+      if(!$('kMotivo').value)return fail('Selecciona el motivo de la caída.');
+      o.motivo_caida_id=parseInt($('kMotivo').value);o.comentarios=$('kComent').value.trim()||null;
+      // ── CANDADO DE CAÍDA: este cliente mostró interés — hay que demostrar que se intentó ──
+      const _prevCaido=editId?(LEADS.find(x=>x.id===editId)||{}).etapa==='Lead caído':false;
+      if(!_prevCaido){
+        const motivoTxt=((MOTIVOS.find(m=>m.id===parseInt($('kMotivo').value))||{}).nombre||'').toLowerCase();
+        const exento=/equivocado|no es el titular|duplicado/.test(motivoTxt);
+        if(!exento){
+          let nGest=0,nCots=0;
+          try{
+            const [{count:c1},{count:c2}]=await Promise.all([
+              db.from('lead_notas').select('id',{count:'exact',head:true}).eq('lead_id',editId||-1),
+              db.from('cotizaciones').select('id',{count:'exact',head:true}).eq('lead_id',editId||-1)
+            ]);
+            nGest=c1||0;nCots=c2||0;
+          }catch(e){}
+          if(!editId||(nGest<2&&nCots===0))
+            return fail('🚫 Este cliente RESPONDIÓ un mensaje — mostró interés. Para darlo por caído necesita evidencia de intento: al menos 2 notas de gestión o 1 cotización registrada. Trabájalo (o agenda su próximo contacto) antes de rendirte.');
+          const despedida=prompt('🪦 Nota de cierre (obligatoria): ¿cuál fue el último intento y qué respondió el cliente?\n\nEj. "Le ofrecí Azul 2 con 20% enganche, dice que ya firmó con Telcel"');
+          if(!despedida||despedida.trim().length<15)
+            return fail('La nota de cierre es obligatoria (mínimo 15 caracteres) — es el expediente para el reciclaje futuro.');
+          o._notaCierre='🪦 Cierre: '+despedida.trim();
+        }
+      }
+    }
   }
 
   o.proximo_contacto=$('pcFecha').value||null;
+  const _nc=o._notaCierre;delete o._notaCierre;
   o.proximo_contacto_hora=$('pcHora').value||null;
   o.proximo_contacto_nota=$('pcNota').value.trim()||null;
   if(st.padreId)o.lead_padre_id=st.padreId;
@@ -1483,6 +1510,7 @@ async function guardar(){
   if(o.etapa && o.etapa!==etapaAnterior){
     await db.from('bitacora_movimientos').insert({lead_id:editId,agente_id:AGENTE.id,etapa_anterior:etapaAnterior,etapa_nueva:o.etapa,detalle:'Cambio de etapa'}).then(()=>{},()=>{});
   }
+  if(_nc&&editId){try{await db.from('lead_notas').insert({lead_id:editId,agente_id:AGENTE.id,nota:_nc});}catch(e){}}
   cerrarDrawer();toast(editId?'Lead actualizado':'Lead registrado');await cargarLeads();
 }
 function fail(m){$('drMsg').textContent=m;$('drMsg').className='dmsg show';return;}
@@ -4709,6 +4737,22 @@ bindSeg('segLinEq',v=>{st.linEq=v;$('lEquipoW').classList.toggle('hidden',v!=='C
 if($('snFecha'))$('snFecha').addEventListener('input',recalcSinAno);
 if($('lzEquipoSel'))$('lzEquipoSel').addEventListener('change',()=>{$('lzOtroW').classList.toggle('hidden',$('lzEquipoSel').value!=='__otro__');});
 if($('cotEng'))$('cotEng').addEventListener('change',()=>{$('cotEngMontoW').classList.toggle('hidden',$('cotEng').value!=='__monto__');if($('cotEng').value==='__monto__')$('cotEngMonto').focus();});
+async function detectarCampana(){
+  const sel=$('dCampana'),chip=$('dCampAuto');if(!sel)return;
+  const t=tel10($('dTel').value);
+  sel.disabled=false;chip.classList.add('hidden');
+  if(t.length!==10)return;
+  try{
+    const {data}=await db.from('base_enviada').select('campana_id').eq('telefono',t).limit(1);
+    if(data&&data.length&&data[0].campana_id){
+      sel.value=String(data[0].campana_id);
+      if(sel.value===String(data[0].campana_id)){ // la campaña existe en el catálogo activo
+        sel.disabled=true;chip.classList.remove('hidden');
+      }
+    }
+  }catch(e){}
+}
+if($('dTel')){$('dTel').addEventListener('blur',detectarCampana);$('dTel').addEventListener('input',()=>{if(tel10($('dTel').value).length===10)detectarCampana();});}
 $('dPrepago').addEventListener('change',recalcViab);
 $('aUltimaCuota').addEventListener('change',recalcAcel);$('aDiaCorte').addEventListener('input',recalcAcel);
 $('aEquipo').addEventListener('input',e=>{$('aAppsField').classList.toggle('hidden',!e.target.value.trim());});
