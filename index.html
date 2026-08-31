@@ -2796,8 +2796,12 @@ function tokensN(s){return String(s||'').toUpperCase().normalize('NFD').replace(
 function mismoAgente(oficial,crm,crmCompleto){
   const a=tokensN(oficial); if(!a.length)return true;   // sin agente en el reporte: no juzgamos
   const b=tokensN(crm), c=tokensN(crmCompleto);
-  const sub=(x,y)=>x.length&&x.every(t=>y.includes(t));
-  return sub(b,a)||sub(a,b)||sub(a,c)||(c.length&&sub(c,a));
+  // mínimo 2 tokens del lado contenido: evita que "Guillermo" pesque a cualquier GUILLERMO ajeno
+  const sub=(x,y)=>x.length>=2&&x.every(t=>y.includes(t));
+  if(sub(b,a)||sub(a,b)||sub(a,c)||sub(c,a))return true;
+  // respaldo SOLO si el catálogo no tiene nombre completo: nombre corto de una palabra
+  if(!c.length&&b.length===1&&a.includes(b[0]))return true;
+  return false;
 }
 async function conciliarVentas(){
   const inp=$('concFile'), out=$('concOut');
@@ -2957,17 +2961,16 @@ function excelConc(){
   const supDe=ag=>SUPMAP?.[ag]||'—';
   const F=x=>!alcance||coordDe(x.ag)===alcance;
   // coordinador de un faltante: por el agente oficial → agente del catálogo
-  const coordDeOficial=agOfi=>{
-    const A=Object.values(AGPORID||{}).find(a=>a.rol==='agente'&&mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
-    return A?coordDe(A.nombre):'—';
-  };
+  const agenteDeOficial=agOfi=>Object.values(AGPORID||{}).find(a=>a.rol==='agente'&&mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
+  const coordDeOficial=agOfi=>{const A=agenteDeOficial(agOfi);return A?coordDe(A.nombre):'—';};
+  const supDeOficial=agOfi=>{const A=agenteDeOficial(agOfi);return A?supDe(A.nombre):'—';};
   const hojas=[
     ['🚨 Sin respaldo',['Coordinación','Supervisor','Agente','Teléfono','Folio CRM','Fecha venta CRM'],
       LAST_CONC.sospechosas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''])],
     ['🔁 Agente distinto',['Coordinación','Supervisor','Agente CRM','Agente oficial','Teléfono','Folio','Fecha oficial'],
       LAST_CONC.cruzadas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.agOfi,x.l.telefono,x.f,x.dia||''])],
-    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Fecha venta oficial','Estatus','Canal','Campaña del envío'],
-      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.dia||'',v.est||'',v.canal==='leads'?'📬 De leads':(v.canal==='otro'?'🌐 Otro canal':'Sin teléfono'),v.campEnv||''])],
+    ['📄 Sin tipificar',['Coordinación','Supervisor','Agente oficial','Teléfono cliente','Folio','Fecha venta oficial','Estatus','Canal','Campaña del envío'],
+      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),supDeOficial(v.ag),v.ag||'',v.tel||'',f,v.dia||'',v.est||'',v.canal==='leads'?'📬 De leads':(v.canal==='otro'?'🌐 Otro canal':'Sin teléfono'),v.campEnv||''])],
     ['🚚 En proceso',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial','Estatus oficial'],
       LAST_CONC.enProceso.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.dia||'',x.est])],
     ['✅ Conciliadas',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial'],
