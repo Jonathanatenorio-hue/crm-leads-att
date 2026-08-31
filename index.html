@@ -326,6 +326,9 @@ tbody tr:hover{background:#F7F8FF}
           <div id="etOpciones" style="display:flex;flex-direction:column;gap:2px;font-size:13px"></div>
         </div>
       </div>
+      <div class="selectwrap hidden" id="filterCoordWrap"><select id="fCoord"><option value="">Coordinación: todas</option></select></div>
+      <div class="selectwrap hidden" id="filterSupWrap"><select id="fSup"><option value="">Supervisor: todos</option></select></div>
+      <div class="selectwrap hidden" id="filterCentroWrap"><select id="fCentro"><option value="">Centro: todos</option></select></div>
       <div class="selectwrap hidden" id="filterAgenteWrap"><select id="filterAgente"><option value="">Todos los agentes</option></select></div>
       <div class="viewswitch" id="viewswitch">
         <button data-v="tabla" class="on">▤ Tabla</button>
@@ -843,7 +846,20 @@ async function cargarLeads(){
     LEADS.forEach(l=>{const x=nm[l.id];l._nota=x?x.nota:null;l._notaFecha=x?x.fecha:null;});
   }catch(e){}
   if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
-    fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;}
+    fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;
+    // filtros de estructura: centro / supervisor / coordinación
+    const rolYo=AGENTE.rol;
+    const agEnVista=new Set(LEADS.map(l=>l.agente_id));
+    const A=Object.entries(AGPORID||{}).filter(([id])=>agEnVista.has(parseInt(id))).map(([,a])=>a);
+    const llena=(id,vals,eti)=>{const s=$(id);if(!s)return;const cur2=s.value;
+      s.innerHTML='<option value="">'+eti+'</option>'+vals.map(v=>`<option value="${v}">${v}</option>`).join('');s.value=cur2;};
+    if(['director','coordinador'].includes(rolYo)){
+      llena('fSup',[...new Set(A.map(a=>a.supervisor).filter(Boolean))].sort(),'Supervisor: todos');show($('filterSupWrap'));
+    }
+    if(rolYo==='director'){
+      llena('fCentro',[...new Set(A.map(a=>a.centro).filter(Boolean))].sort(),'Centro: todos');show($('filterCentroWrap'));
+      llena('fCoord',[...new Set(A.map(a=>SUPCOORD?.[a.supervisor]).filter(Boolean))].sort(),'Coordinación: todas');show($('filterCoordWrap'));
+    }}
   refrescar();
 }
 
@@ -1110,10 +1126,17 @@ function render(){
     else _ac.classList.add('hidden');
   }
   const term=$('search').value.trim().toLowerCase(),est=$('filterEstado').value,agF=$('filterAgente')?$('filterAgente').value:'';
+  const supF=$('fSup')?$('fSup').value:'',cenF=$('fCentro')?$('fCentro').value:'',cooF=$('fCoord')?$('fCoord').value:'';
   const etSet=etSeleccion();
   const kpiF=KPI_SUB&&KPI_DEFS[KPI_SUB]?KPI_DEFS[KPI_SUB].f:null;
   let rows=LEADS.filter(l=>{
     if(term&&!((l.telefono||'').includes(term)||(l.nombre||'').toLowerCase().includes(term)))return false;
+    if(supF||cenF||cooF){
+      const _a=AGPORID?.[l.agente_id];
+      if(supF&&_a?.supervisor!==supF)return false;
+      if(cenF&&_a?.centro!==cenF)return false;
+      if(cooF&&SUPCOORD?.[_a?.supervisor]!==cooF)return false;
+    }
     if(kpiF&&!kpiF(l))return false;
     if(est==='__vender__'&&!(l.viabilidad==='VIABLE'&&l.etapa!=='Lead caído'))return false;
     if(est==='sin'&&l.viabilidad)return false;
@@ -1151,7 +1174,7 @@ function render(){
   const _kcf=$('kConvFoot');if(_kcf)_kcf.textContent='sobre vendibles';
   const tb=$('tbody');tb.innerHTML='';
   // ── contador de resultados del filtro + paginación 20 en 20 ──
-  const _sig=[term,est,agF,[...etSet].join(','),KPI_SUB||'',ACEL_SUB||'',ordF].join('|');
+  const _sig=[term,est,agF,supF,cenF,cooF,[...etSet].join(','),KPI_SUB||'',ACEL_SUB||'',ordF].join('|');
   if(_sig!==OP_SIG){OP_SIG=_sig;OP_PAGE=1;}
   const _tot=rows.length,_pags=Math.max(Math.ceil(_tot/OP_TAM),1);
   if(OP_PAGE>_pags)OP_PAGE=_pags;
@@ -2276,6 +2299,11 @@ async function renderDashboard(){
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   try{wireEmbudoBase();}catch(e){}
   const _cc=$('btnConciliar');if(_cc)_cc.onclick=conciliarVentas;
+  if(CONC_HTML&&$('concOut')&&!$('concOut').innerHTML){
+    $('concOut').innerHTML=CONC_HTML;
+    const _br2=$('btnConcRepartir');if(_br2)_br2.onclick=repartirConc;
+    const _bx2=$('btnConcExcel');if(_bx2)_bx2.onclick=excelConc;
+  }
   const _cd=$('concDesde');
   if(_cd&&!_cd.value){
     const vf=LEADS.filter(l=>l.etapa==='Venta exitosa'&&l.fecha_venta).map(l=>diaLocal(l.fecha_venta)).sort();
@@ -2835,9 +2863,15 @@ async function conciliarVentas(){
         x=>fila('',`${x.ag} · ${x.l.telefono} · folio ${x.f} · estatus: <b>${x.est}</b>`))+
       bloque('✅ Coincidencias perfectas','#D1FAE5',ok,
         x=>fila('color:#065F46',`${x.ag} · ${x.l.telefono} · folio ${x.f}`));
-    LAST_CONC={sospechosas,cruzadas};
-    if(sospechosas.length||cruzadas.length)out.innerHTML+='<div style="margin-top:12px"><button class="btn btn-primary" id="btnConcRepartir">📤 Repartir pendientes a coordinadores (WhatsApp)</button></div><div id="concReparto"></div>';
+    LAST_CONC={sospechosas,cruzadas,ok,enProceso,faltantes};
+    out.innerHTML+='<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      +((sospechosas.length||cruzadas.length)?'<button class="btn btn-primary" id="btnConcRepartir">📤 Repartir a coordinadores (WhatsApp)</button>':'')
+      +'<select id="concExcAlcance"><option value="">📗 Excel: cruce completo</option>'
+      +[...new Set([...sospechosas,...cruzadas,...ok,...enProceso].map(x=>SUPCOORD?.[SUPMAP?.[x.ag]]).filter(Boolean))].sort().map(c=>'<option value="'+c+'">📗 Excel: solo '+c+'</option>').join('')
+      +'</select><button class="btn btn-ghost" id="btnConcExcel">⬇ Descargar Excel</button></div><div id="concReparto"></div>';
     const _br=$('btnConcRepartir');if(_br)_br.onclick=repartirConc;
+    const _bx=$('btnConcExcel');if(_bx)_bx.onclick=excelConc;
+    CONC_HTML=out.innerHTML;
     toast('Cruce completo: '+nOfi+' folios oficiales vs '+VC.length+' ventas CRM');
     // ── PERSISTENCIA: lo bueno se acumula, lo malo entra a pendientes ──
     try{
@@ -2855,6 +2889,12 @@ async function conciliarVentas(){
       const okFolios=ok.map(x=>x.f.split(' ·')[0]);
       for(let i=0;i<okFolios.length;i+=200)
         await db.from('conciliaciones_ventas').update({estado:'resuelto',resuelto_en:new Date().toISOString()}).in('folio',okFolios.slice(i,i+200)).eq('estado','pendiente');
+      // ESPEJO: la bandeja refleja SOLO el cruce vigente — lo que ya no es discrepancia se resuelve solo
+      const vivas=new Set(pend.map(p=>p.tipo+'|'+p.folio));
+      const {data:abiertas}=await db.from('conciliaciones_ventas').select('id,tipo,folio').eq('estado','pendiente').limit(5000);
+      const obsoletas=(abiertas||[]).filter(p=>!vivas.has(p.tipo+'|'+p.folio)).map(p=>p.id);
+      for(let i=0;i<obsoletas.length;i+=200)
+        await db.from('conciliaciones_ventas').update({estado:'resuelto',resuelto_en:new Date().toISOString()}).in('id',obsoletas.slice(i,i+200));
       await cargarPendConc();
       await cargarLeads();
     }catch(e){console.warn('persistencia conciliación:',e.message);}
@@ -2886,7 +2926,52 @@ async function cargarPendConc(pag){
       </div>`:'');
   }catch(e){box.innerHTML='<div class="hint" style="font-size:12px;color:#B45309">La bandeja de pendientes necesita el SQL 31 (tabla conciliaciones_ventas).</div>';}
 }
-let LAST_CONC=null;
+let LAST_CONC=null,CONC_HTML=null;
+function excelConc(){
+  if(!LAST_CONC)return;
+  const alcance=$('concExcAlcance')?$('concExcAlcance').value:'';
+  const NAVY='0E2A4E', borde={style:'thin',color:{rgb:'D0D7E2'}};
+  const coordDe=ag=>SUPCOORD?.[SUPMAP?.[ag]]||'—';
+  const supDe=ag=>SUPMAP?.[ag]||'—';
+  const F=x=>!alcance||coordDe(x.ag)===alcance;
+  // coordinador de un faltante: por el agente oficial → agente del catálogo
+  const coordDeOficial=agOfi=>{
+    const A=Object.values(AGPORID||{}).find(a=>a.rol==='agente'&&mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
+    return A?coordDe(A.nombre):'—';
+  };
+  const hojas=[
+    ['🚨 Sin respaldo',['Coordinación','Supervisor','Agente','Teléfono','Folio CRM','Fecha venta CRM'],
+      LAST_CONC.sospechosas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''])],
+    ['🔁 Agente distinto',['Coordinación','Supervisor','Agente CRM','Agente oficial','Teléfono','Folio'],
+      LAST_CONC.cruzadas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.agOfi,x.l.telefono,x.f])],
+    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Estatus'],
+      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.est||''])],
+    ['🚚 En proceso',['Coordinación','Supervisor','Agente','Teléfono','Folio','Estatus oficial'],
+      LAST_CONC.enProceso.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.est])],
+    ['✅ Conciliadas',['Coordinación','Supervisor','Agente','Teléfono','Folio'],
+      LAST_CONC.ok.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f])],
+  ];
+  const wb=XLSX.utils.book_new();
+  const hoy=new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
+  hojas.forEach(([titulo,H,filas])=>{
+    const aoa=[[titulo+' — Conciliación de ventas'+(alcance?' · '+alcance:' · toda la operación')],
+               ['Generado el '+hoy+' · '+filas.length+' registros'],[],H,...filas];
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=H.map((h,i)=>({wch:i===0?18:(h.includes('Agente')?26:(h.includes('Teléfono')?14:16))}));
+    ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:H.length-1}},{s:{r:1,c:0},e:{r:1,c:H.length-1}}];
+    const rng=XLSX.utils.decode_range(ws['!ref']);
+    for(let R=rng.s.r;R<=rng.e.r;R++)for(let C=rng.s.c;C<=rng.e.c;C++){
+      const cell=ws[XLSX.utils.encode_cell({r:R,c:C})];if(!cell)continue;
+      if(R===0)cell.s={font:{name:'Arial',bold:true,sz:13,color:{rgb:NAVY}}};
+      else if(R===1)cell.s={font:{name:'Arial',sz:9,color:{rgb:'667085'}}};
+      else if(R===3)cell.s={font:{name:'Arial',bold:true,sz:9,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:NAVY}},alignment:{horizontal:'center',vertical:'center'},border:{bottom:borde}};
+      else if(R>3)cell.s={font:{name:'Arial',sz:9,color:{rgb:'1F2937'}},fill:(R%2===0?{fgColor:{rgb:'F5F7FB'}}:undefined),alignment:{horizontal:C<=2?'left':'center'},border:{bottom:borde}};
+    }
+    XLSX.utils.book_append_sheet(wb,ws,titulo.replace(/[\\\/\?\*\[\]]/g,'').slice(0,31));
+  });
+  XLSX.writeFile(wb,'conciliacion_'+(alcance?alcance.toLowerCase().replace(/ /g,'_')+'_':'completa_')+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast('Excel de conciliación descargado'+(alcance?' — '+alcance:''));
+}
 function pintaBloque(bid){
   const b=window.__concBloques[bid];if(!b)return '';
   const pgs=Math.max(Math.ceil(b.items.length/20),1);
@@ -2933,6 +3018,7 @@ function repartirConc(){
       <pre style="margin:0;padding:12px 14px;font-size:11.5px;white-space:pre-wrap;font-family:inherit;color:#374151;max-height:220px;overflow:auto">${msg.replace(/</g,'&lt;')}</pre>
     </div>`;
   }).join('')||'<div class="dash-empty">Nada que repartir 🎉</div>';
+  const _o=$('concOut');if(_o)CONC_HTML=_o.innerHTML;
 }
 function concAbrirLead(id){
   const l=LEADS.find(x=>x.id===id);
@@ -5091,6 +5177,7 @@ if($('etOpciones'))$('etOpciones').addEventListener('change',()=>{ACEL_SUB=null;
 if($('etLimpiar'))$('etLimpiar').addEventListener('click',()=>{etSoltar([]);ACEL_SUB=null;render();});
 document.addEventListener('click',e=>{const w=$('etWrap');if(w&&!w.contains(e.target))$('etPanel').classList.add('hidden');});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
 $('filterAgente').addEventListener('change',refrescar);
+['fSup','fCentro','fCoord'].forEach(id=>{const s=$(id);if(s)s.addEventListener('change',render);});
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
 
