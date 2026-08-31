@@ -1155,6 +1155,7 @@ function render(){
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
     const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
+    const concChip=l.etapa==='Venta exitosa'?(l.venta_conciliada_en?' <span class="badge" style="font-size:10px;padding:2px 7px;background:#DBEAFE;color:#1D4ED8" title="Conciliada contra el reporte oficial el '+fechaCorta(l.venta_conciliada_en)+'">🧾✓</span>':' <span class="badge" style="font-size:10px;padding:2px 7px;background:#F3F4F6;color:#6B7280" title="Aún sin cruzar contra el reporte oficial">🕓</span>'):'';
     const _hoyIso=isoLocal(new Date());
     const pcChip=l.proximo_contacto&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?
       ' <span class="badge" style="font-size:10px;padding:2px 7px;'+(l.proximo_contacto<_hoyIso?'background:#FEE2E2;color:#991B1B':(l.proximo_contacto===_hoyIso?'background:#D1FAE5;color:#065F46':'background:#F3F4F6;color:#475569'))+'" title="'+String(l.proximo_contacto_nota||'Próximo contacto').replace(/"/g,'&quot;')+'">📅 '+(l.proximo_contacto===_hoyIso?'HOY':fechaCorta(l.proximo_contacto))+(l.proximo_contacto_hora?' '+String(l.proximo_contacto_hora).slice(0,5):'')+'</span>':'';
@@ -1166,7 +1167,7 @@ function render(){
     const segChip=(_refG&&!['Venta exitosa','Lead caído'].includes(l.etapa||''))?(segHoy
       ?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Gestionado hoy">✓ hoy</span>'
       :' <span class="badge" style="background:#F3F4F6;color:#6B7280;font-size:10px;padding:2px 7px" title="Última gestión">✓ '+fechaCorta(new Date(_refG))+'</span>'):'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+anChip+lzChip;
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+concChip+anChip+lzChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
@@ -2202,6 +2203,15 @@ async function renderDashboard(){
       </div>
       <div id="embudoBaseWrap" style="margin-top:12px;overflow-x:auto"></div>
     </div>`:''}
+    ${AGENTE.rol==='director'?`<div class="dash-card" style="margin-top:16px"><h3>🧾 Conciliador de ventas · reporte oficial</h3>
+      <div class="dc-sub">Sube el reporte oficial (Excel con folio y agente) y se cruza contra las ventas tipificadas en el CRM: coincidencias, sospechosas, faltantes y atribuciones cruzadas.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <input type="file" id="concFile" accept=".xlsx,.xls,.csv">
+        <button class="btn btn-primary" id="btnConciliar">Cruzar</button>
+      </div>
+      <div id="concOut" style="margin-top:12px"></div>
+      <div id="concPendBox"></div>
+    </div>`:''}
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
@@ -2243,6 +2253,8 @@ async function renderDashboard(){
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   try{wireEmbudoBase();}catch(e){}
+  const _cc=$('btnConciliar');if(_cc)_cc.onclick=conciliarVentas;
+  try{cargarPendConc();}catch(e){}
   const _r5=$('btnRankTop5');if(_r5)_r5.onclick=()=>generarRanking('top5');
   const _rf=$('btnRankFull');if(_rf)_rf.onclick=()=>generarRanking('full');
   const _rx=$('btnRepXls');if(_rx)_rx.onclick=exportTabla;
@@ -2712,6 +2724,122 @@ function renderEmbudoBase(){
   });
   const H=Math.max(tyE,ySin+hS+60,conEnvio?topY+hEnv+40:0,420)+20;
   wrap.innerHTML=`<svg viewBox="0 0 ${W+230} ${H}" style="min-width:900px;width:100%;font-family:Inter,system-ui"><defs>${defs}</defs>${svgL}${svgN}${svgD}</svg>`;
+}
+function normFolio(f){return String(f??'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+function tokensN(s){return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').split(/\s+/).filter(Boolean);}
+function mismoAgente(oficial,crm,crmCompleto){
+  const a=tokensN(oficial); if(!a.length)return true;   // sin agente en el reporte: no juzgamos
+  const b=tokensN(crm), c=tokensN(crmCompleto);
+  const sub=(x,y)=>x.length&&x.every(t=>y.includes(t));
+  return sub(b,a)||sub(a,b)||sub(a,c)||(c.length&&sub(c,a));
+}
+async function conciliarVentas(){
+  const inp=$('concFile'), out=$('concOut');
+  if(!inp||!inp.files||!inp.files.length)return toast('Elige el archivo del reporte oficial',false);
+  out.innerHTML='<div class="dash-empty">Cruzando…</div>';
+  try{
+    const buf=await inp.files[0].arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const filas=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    if(!filas.length)return out.innerHTML='<div class="dash-empty">Archivo vacío.</div>';
+    // detectar columnas por encabezado
+    const head=filas[0].map(h=>String(h).toLowerCase());
+    const iFol=head.findIndex(h=>h.includes('folio'));
+    const iAg=head.findIndex(h=>/(agente|vendedor|ejecutivo|asesor)/.test(h));
+    const iEst=head.findIndex(h=>h.includes('estatus')||h.includes('status'));
+    if(iFol<0)return out.innerHTML='<div class="dash-empty">No encontré una columna "folio" en el archivo — revisa los encabezados.</div>';
+    const OF={};   // folio → agente oficial
+    const OFCORE={}; // núcleo numérico → [folios oficiales]
+    filas.slice(1).forEach(r=>{const f=normFolio(r[iFol]);if(f){OF[f]={ag:iAg>=0?String(r[iAg]).trim():'',est:iEst>=0?String(r[iEst]).trim():''};const nc=f.replace(/[^0-9]/g,'');if(nc)(OFCORE[nc]=OFCORE[nc]||[]).push(f);}});
+    const nOfi=Object.keys(OF).length;
+    if(!nOfi)return out.innerHTML='<div class="dash-empty">No encontré folios en el archivo.</div>';
+    // ventas del CRM
+    const VC=LEADS.filter(l=>l.etapa==='Venta exitosa');
+    const ok=[],sospechosas=[],cruzadas=[],enProceso=[],usados=new Set();
+    const esFirme=e=>/entregad/i.test(e||'');
+    VC.forEach(l=>{
+      let f=normFolio(l.folio_avs);
+      const ag=l.agentes?.nombre||'—';
+      let sufijo='';
+      if(f&&!(f in OF)){
+        // segundo intento: núcleo numérico (perdona sufijos como la "A") — solo si es INEQUÍVOCO
+        const cands=(OFCORE[f.replace(/[^0-9]/g,'')]||[]).filter(x=>!usados.has(x));
+        if(cands.length===1){sufijo=' · sufijo distinto (CRM '+f+' vs oficial '+cands[0]+')';f=cands[0];}
+      }
+      if(!f||!(f in OF)){sospechosas.push({l,f:f||'SIN FOLIO',ag});return;}
+      usados.add(f);
+      const agOfi=OF[f].ag, estOfi=OF[f].est;
+      const compl=(typeof AGPORID!=='undefined'&&Object.values(AGPORID).find(x=>x.nombre===ag)?.nombre_completo)||'';
+      if(!mismoAgente(agOfi,ag,compl))cruzadas.push({l,f:f+sufijo,ag,agOfi,est:estOfi});
+      else if(esFirme(estOfi))ok.push({l,f:f+sufijo,ag});
+      else enProceso.push({l,f:f+sufijo,ag,est:estOfi||'(sin estatus)'});
+    });
+    const CAT=(typeof AGPORID!=='undefined')?Object.values(AGPORID).filter(a=>a.rol==='agente'):[];
+    const esDeMiPlantilla=agOfi=>CAT.some(a=>mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
+    const faltantes=Object.entries(OF).filter(([f,v])=>!usados.has(f)&&esDeMiPlantilla(v.ag));
+    const fila=(cls,cont)=>`<div style="padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px;${cls}">${cont}</div>`;
+    const bloque=(titulo,color,items,render)=>items.length?`<details ${titulo.includes('🚨')||titulo.includes('🔁')?'open':''} style="margin-top:10px;border:1px solid var(--line,#E5E7EB);border-radius:10px;overflow:hidden"><summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:${color}">${titulo} (${items.length})</summary>${items.map(render).join('')}</details>`:'';
+    out.innerHTML=
+      `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+        <div class="chip" style="background:#D1FAE5;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${ok.length}</b> ✅ coinciden</div>
+        <div class="chip" style="background:#FEE2E2;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${sospechosas.length}</b> 🚨 en CRM sin respaldo oficial</div>
+        <div class="chip" style="background:#FEF3C7;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${cruzadas.length}</b> 🔁 agente distinto</div>
+        <div class="chip" style="background:#E0E7FF;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${faltantes.length}</b> 📄 oficiales sin tipificar (mi plantilla)</div>
+        <div class="chip" style="background:#F3E8FF;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${enProceso.length}</b> 🚚 en proceso oficial</div>
+      </div>`+
+      bloque('🚨 Tipificadas en el CRM SIN respaldo en el reporte oficial — revisar una por una','#FEE2E2',sospechosas,
+        x=>fila('color:#991B1B;font-weight:600',`${x.ag} · ${x.l.telefono} · folio: ${x.f} · ${x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''}`))+
+      bloque('🔁 Folio válido pero AGENTE distinto — atribución a revisar','#FEF3C7',cruzadas,
+        x=>fila('',`folio ${x.f} · CRM: <b>${x.ag}</b> vs oficial: <b>${x.agOfi}</b> · ${x.l.telefono}`))+
+      bloque('📄 En el reporte oficial pero SIN tipificar en el CRM — ventas sin registrar','#E0E7FF',faltantes,
+        ([f,v])=>fila('',`folio ${f}${v.ag?' · agente oficial: '+v.ag:''}${v.est?' · '+v.est:''}`))+
+      bloque('🚚 Cruzadas pero con estatus EN PROCESO (se sellarán cuando el oficial diga Entregado)','#F3E8FF',enProceso,
+        x=>fila('',`${x.ag} · ${x.l.telefono} · folio ${x.f} · estatus: <b>${x.est}</b>`))+
+      bloque('✅ Coincidencias perfectas','#D1FAE5',ok,
+        x=>fila('color:#065F46',`${x.ag} · ${x.l.telefono} · folio ${x.f}`));
+    toast('Cruce completo: '+nOfi+' folios oficiales vs '+VC.length+' ventas CRM');
+    // ── PERSISTENCIA: lo bueno se acumula, lo malo entra a pendientes ──
+    try{
+      const okIds=ok.map(x=>x.l.id).filter(id=>!LEADS.find(z=>z.id===id)?.venta_conciliada_en);
+      for(let i=0;i<okIds.length;i+=200)
+        await db.from('leads').update({venta_conciliada_en:new Date().toISOString()}).in('id',okIds.slice(i,i+200));
+      const pend=[
+        ...sospechosas.map(x=>({tipo:'sin_respaldo',folio:x.f,lead_id:x.l.id,agente_crm:x.ag,agente_oficial:null,detalle:x.l.telefono+' · '+(x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''),estado:'pendiente'})),
+        ...cruzadas.map(x=>({tipo:'agente_distinto',folio:x.f.split(' ·')[0],lead_id:x.l.id,agente_crm:x.ag,agente_oficial:x.agOfi,detalle:x.l.telefono,estado:'pendiente'})),
+        ...faltantes.map(([f,v])=>({tipo:'sin_tipificar',folio:f,lead_id:null,agente_crm:null,agente_oficial:v.ag||null,detalle:v.est||null,estado:'pendiente'}))
+      ];
+      for(let i=0;i<pend.length;i+=200)
+        await db.from('conciliaciones_ventas').upsert(pend.slice(i,i+200),{onConflict:'tipo,folio'});
+      // auto-resolver: folios que hoy cruzaron bien y estaban pendientes
+      const okFolios=ok.map(x=>x.f.split(' ·')[0]);
+      for(let i=0;i<okFolios.length;i+=200)
+        await db.from('conciliaciones_ventas').update({estado:'resuelto',resuelto_en:new Date().toISOString()}).in('folio',okFolios.slice(i,i+200)).eq('estado','pendiente');
+      await cargarPendConc();
+      await cargarLeads();
+    }catch(e){console.warn('persistencia conciliación:',e.message);}
+  }catch(e){out.innerHTML='<div class="dash-empty">Error leyendo el archivo: '+e.message+'</div>';}
+}
+async function cargarPendConc(){
+  const box=$('concPendBox');if(!box)return;
+  try{
+    const {data}=await db.from('conciliaciones_ventas').select('*').eq('estado','pendiente').order('creado_en',{ascending:false}).limit(300);
+    const P=data||[];
+    if(!P.length){box.innerHTML='<div class="hint" style="font-size:12px;color:#065F46;margin-top:8px">✅ Sin pendientes de conciliación — todo cuadra.</div>';return;}
+    const TIPO={sin_respaldo:['🚨 Sin respaldo oficial','#FEE2E2;color:#991B1B'],agente_distinto:['🔁 Agente distinto','#FEF3C7;color:#92400E'],sin_tipificar:['📄 Oficial sin tipificar','#E0E7FF;color:#3730A3']};
+    box.innerHTML='<div style="font-weight:700;margin-top:12px">📌 Pendientes por corregir ('+P.length+')</div>'+
+      P.map(p=>{const t=TIPO[p.tipo]||['?',''];
+        return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px">
+          <span class="badge" style="font-size:10px;padding:2px 8px;background:${t[1]}">${t[0]}</span>
+          <span style="flex:1">folio <b>${p.folio}</b>${p.agente_crm?' · CRM: '+p.agente_crm:''}${p.agente_oficial?' · oficial: '+p.agente_oficial:''}${p.detalle?' · '+p.detalle:''}</span>
+          <button class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="resolverPendConc(${p.id})">✔ Resuelto</button>
+        </div>`;}).join('');
+  }catch(e){box.innerHTML='<div class="hint" style="font-size:12px;color:#B45309">La bandeja de pendientes necesita el SQL 31 (tabla conciliaciones_ventas).</div>';}
+}
+async function resolverPendConc(id){
+  await db.from('conciliaciones_ventas').update({estado:'resuelto',resuelto_en:new Date().toISOString()}).eq('id',id);
+  toast('Pendiente marcado como resuelto');
+  cargarPendConc();
 }
 function wireEmbudoBase(){
   const s=$('embCamp');if(!s)return;
