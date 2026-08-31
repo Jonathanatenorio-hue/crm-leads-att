@@ -1991,13 +1991,13 @@ async function cargarSupMap(){
   SUPMAP={};
   try{
     const [{data:ags},{data:sups}]=await Promise.all([
-      db.from('agentes').select('id,nombre,supervisor_id,centro,rol,activo'),
+      db.from('agentes').select('id,nombre,nombre_completo,supervisor_id,centro,rol,activo'),
       db.from('supervisores').select('id,nombre,coordinador')]);
     const S={};SUPCOORD={};(sups||[]).forEach(s=>{S[s.id]=s.nombre;if(s.coordinador)SUPCOORD[s.nombre]=s.coordinador;});
     CENTROMAP={};(ags||[]).forEach(a=>{if(a.centro)CENTROMAP[a.nombre]=a.centro;});
     AGPORID={};
     (ags||[]).forEach(a=>{if(a.supervisor_id&&S[a.supervisor_id])SUPMAP[a.nombre]=S[a.supervisor_id];
-      AGPORID[a.id]={nombre:a.nombre,supervisor:S[a.supervisor_id]||null,centro:a.centro||null,rol:a.rol,activo:a.activo};});
+      AGPORID[a.id]={nombre:a.nombre,nombre_completo:a.nombre_completo||'',supervisor:S[a.supervisor_id]||null,centro:a.centro||null,rol:a.rol,activo:a.activo};});
   }catch(e){}
 }
 function rangoFechas(){
@@ -2207,6 +2207,7 @@ async function renderDashboard(){
       <div class="dc-sub">Sube el reporte oficial (Excel con folio y agente) y se cruza contra las ventas tipificadas en el CRM: coincidencias, sospechosas, faltantes y atribuciones cruzadas.</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
         <input type="file" id="concFile" accept=".xlsx,.xls,.csv">
+        <label style="font-size:12px;color:#6B7280">Conciliar desde <input type="date" id="concDesde" style="margin-left:4px"></label>
         <button class="btn btn-primary" id="btnConciliar">Cruzar</button>
       </div>
       <div id="concOut" style="margin-top:12px"></div>
@@ -2254,6 +2255,11 @@ async function renderDashboard(){
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   try{wireEmbudoBase();}catch(e){}
   const _cc=$('btnConciliar');if(_cc)_cc.onclick=conciliarVentas;
+  const _cd=$('concDesde');
+  if(_cd&&!_cd.value){
+    const vf=LEADS.filter(l=>l.etapa==='Venta exitosa'&&l.fecha_venta).map(l=>diaLocal(l.fecha_venta)).sort();
+    if(vf.length)_cd.value=vf[0];
+  }
   try{cargarPendConc();}catch(e){}
   const _r5=$('btnRankTop5');if(_r5)_r5.onclick=()=>generarRanking('top5');
   const _rf=$('btnRankFull');if(_rf)_rf.onclick=()=>generarRanking('full');
@@ -2748,10 +2754,13 @@ async function conciliarVentas(){
     const iFol=head.findIndex(h=>h.includes('folio'));
     const iAg=head.findIndex(h=>/(agente|vendedor|ejecutivo|asesor)/.test(h));
     const iEst=head.findIndex(h=>h.includes('estatus')||h.includes('status'));
+    const iTel=head.findIndex(h=>h.includes('telefono')||h.includes('teléfono'));
+    const iFec=head.findIndex(h=>h.includes('fecha'));
+    const exDia=v=>{if(v==null||v==='')return '';if(typeof v==='number')return new Date(Math.round((v-25569)*864e5)).toISOString().slice(0,10);const s=String(v);return /^\d{4}-\d{2}-\d{2}/.test(s)?s.slice(0,10):'';};
     if(iFol<0)return out.innerHTML='<div class="dash-empty">No encontré una columna "folio" en el archivo — revisa los encabezados.</div>';
     const OF={};   // folio → agente oficial
     const OFCORE={}; // núcleo numérico → [folios oficiales]
-    filas.slice(1).forEach(r=>{const f=normFolio(r[iFol]);if(f){OF[f]={ag:iAg>=0?String(r[iAg]).trim():'',est:iEst>=0?String(r[iEst]).trim():''};const nc=f.replace(/[^0-9]/g,'');if(nc)(OFCORE[nc]=OFCORE[nc]||[]).push(f);}});
+    filas.slice(1).forEach(r=>{const f=normFolio(r[iFol]);if(f){OF[f]={ag:iAg>=0?String(r[iAg]).trim():'',est:iEst>=0?String(r[iEst]).trim():'',tel:iTel>=0?tel10(r[iTel]):'',dia:iFec>=0?exDia(r[iFec]):''};const nc=f.replace(/[^0-9]/g,'');if(nc)(OFCORE[nc]=OFCORE[nc]||[]).push(f);}});
     const nOfi=Object.keys(OF).length;
     if(!nOfi)return out.innerHTML='<div class="dash-empty">No encontré folios en el archivo.</div>';
     // ventas del CRM
@@ -2777,7 +2786,8 @@ async function conciliarVentas(){
     });
     const CAT=(typeof AGPORID!=='undefined')?Object.values(AGPORID).filter(a=>a.rol==='agente'):[];
     const esDeMiPlantilla=agOfi=>CAT.some(a=>mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
-    const faltantes=Object.entries(OF).filter(([f,v])=>!usados.has(f)&&esDeMiPlantilla(v.ag));
+    const desde=$('concDesde')?$('concDesde').value:'';
+    const faltantes=Object.entries(OF).filter(([f,v])=>!usados.has(f)&&esDeMiPlantilla(v.ag)&&(!desde||!v.dia||v.dia>=desde));
     const fila=(cls,cont)=>`<div style="padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px;${cls}">${cont}</div>`;
     const bloque=(titulo,color,items,render)=>items.length?`<details ${titulo.includes('🚨')||titulo.includes('🔁')?'open':''} style="margin-top:10px;border:1px solid var(--line,#E5E7EB);border-radius:10px;overflow:hidden"><summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:${color}">${titulo} (${items.length})</summary>${items.map(render).join('')}</details>`:'';
     out.innerHTML=
@@ -2788,16 +2798,19 @@ async function conciliarVentas(){
         <div class="chip" style="background:#E0E7FF;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${faltantes.length}</b> 📄 oficiales sin tipificar (mi plantilla)</div>
         <div class="chip" style="background:#F3E8FF;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${enProceso.length}</b> 🚚 en proceso oficial</div>
       </div>`+
-      bloque('🚨 Tipificadas en el CRM SIN respaldo en el reporte oficial — revisar una por una','#FEE2E2',sospechosas,
-        x=>fila('color:#991B1B;font-weight:600',`${x.ag} · ${x.l.telefono} · folio: ${x.f} · ${x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''}`))+
-      bloque('🔁 Folio válido pero AGENTE distinto — atribución a revisar','#FEF3C7',cruzadas,
-        x=>fila('',`folio ${x.f} · CRM: <b>${x.ag}</b> vs oficial: <b>${x.agOfi}</b> · ${x.l.telefono}`))+
-      bloque('📄 En el reporte oficial pero SIN tipificar en el CRM — ventas sin registrar','#E0E7FF',faltantes,
-        ([f,v])=>fila('',`folio ${f}${v.ag?' · agente oficial: '+v.ag:''}${v.est?' · '+v.est:''}`))+
+      bloque('🚨 Tipificadas en el CRM SIN respaldo oficial — clic para abrir y corregir el folio','#FEE2E2',sospechosas,
+        x=>fila('color:#991B1B;font-weight:600;cursor:pointer" onclick="concAbrirLead('+x.l.id+')',`${x.ag} · ${x.l.telefono} · folio: ${x.f} · ${x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''} <span style="float:right">✏️ corregir</span>`))+
+      bloque('🔁 Folio válido pero AGENTE distinto — clic para abrir y reasignar','#FEF3C7',cruzadas,
+        x=>fila('cursor:pointer" onclick="concAbrirLead('+x.l.id+')',`folio ${x.f} · CRM: <b>${x.ag}</b> vs oficial: <b>${x.agOfi}</b> · ${x.l.telefono} <span style="float:right">✏️</span>`))+
+      bloque('📄 En el oficial pero SIN tipificar en el CRM — clic para buscar al cliente por teléfono','#E0E7FF',faltantes,
+        ([f,v])=>fila('cursor:pointer" onclick="concBuscarTel(\''+(v.tel||'')+'\')',`folio ${f}${v.ag?' · '+v.ag:''}${v.tel?' · 📞 '+v.tel:''}${v.est?' · '+v.est:''} <span style="float:right">🔎</span>`))+
       bloque('🚚 Cruzadas pero con estatus EN PROCESO (se sellarán cuando el oficial diga Entregado)','#F3E8FF',enProceso,
         x=>fila('',`${x.ag} · ${x.l.telefono} · folio ${x.f} · estatus: <b>${x.est}</b>`))+
       bloque('✅ Coincidencias perfectas','#D1FAE5',ok,
         x=>fila('color:#065F46',`${x.ag} · ${x.l.telefono} · folio ${x.f}`));
+    LAST_CONC={sospechosas,cruzadas};
+    if(sospechosas.length||cruzadas.length)out.innerHTML+='<div style="margin-top:12px"><button class="btn btn-primary" id="btnConcRepartir">📤 Repartir pendientes a coordinadores (WhatsApp)</button></div><div id="concReparto"></div>';
+    const _br=$('btnConcRepartir');if(_br)_br.onclick=repartirConc;
     toast('Cruce completo: '+nOfi+' folios oficiales vs '+VC.length+' ventas CRM');
     // ── PERSISTENCIA: lo bueno se acumula, lo malo entra a pendientes ──
     try{
@@ -2807,7 +2820,7 @@ async function conciliarVentas(){
       const pend=[
         ...sospechosas.map(x=>({tipo:'sin_respaldo',folio:x.f,lead_id:x.l.id,agente_crm:x.ag,agente_oficial:null,detalle:x.l.telefono+' · '+(x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''),estado:'pendiente'})),
         ...cruzadas.map(x=>({tipo:'agente_distinto',folio:x.f.split(' ·')[0],lead_id:x.l.id,agente_crm:x.ag,agente_oficial:x.agOfi,detalle:x.l.telefono,estado:'pendiente'})),
-        ...faltantes.map(([f,v])=>({tipo:'sin_tipificar',folio:f,lead_id:null,agente_crm:null,agente_oficial:v.ag||null,detalle:v.est||null,estado:'pendiente'}))
+        ...faltantes.map(([f,v])=>({tipo:'sin_tipificar',folio:f,lead_id:null,agente_crm:null,agente_oficial:v.ag||null,detalle:[v.tel,v.est].filter(Boolean).join(' · ')||null,estado:'pendiente'}))
       ];
       for(let i=0;i<pend.length;i+=200)
         await db.from('conciliaciones_ventas').upsert(pend.slice(i,i+200),{onConflict:'tipo,folio'});
@@ -2831,10 +2844,59 @@ async function cargarPendConc(){
       P.map(p=>{const t=TIPO[p.tipo]||['?',''];
         return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px">
           <span class="badge" style="font-size:10px;padding:2px 8px;background:${t[1]}">${t[0]}</span>
-          <span style="flex:1">folio <b>${p.folio}</b>${p.agente_crm?' · CRM: '+p.agente_crm:''}${p.agente_oficial?' · oficial: '+p.agente_oficial:''}${p.detalle?' · '+p.detalle:''}</span>
+          <span style="flex:1;cursor:pointer" onclick="${p.lead_id?'concAbrirLead('+p.lead_id+')':'concBuscarTel(\''+String((p.detalle||'').match(/\d{10}/)?.[0]||'')+'\')'}">folio <b>${p.folio}</b>${p.agente_crm?' · CRM: '+p.agente_crm:''}${p.agente_oficial?' · oficial: '+p.agente_oficial:''}${p.detalle?' · '+p.detalle:''} ✏️</span>
           <button class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="resolverPendConc(${p.id})">✔ Resuelto</button>
         </div>`;}).join('');
   }catch(e){box.innerHTML='<div class="hint" style="font-size:12px;color:#B45309">La bandeja de pendientes necesita el SQL 31 (tabla conciliaciones_ventas).</div>';}
+}
+let LAST_CONC=null;
+function repartirConc(){
+  if(!LAST_CONC)return;
+  const box=$('concReparto');
+  const coordDe=ag=>SUPCOORD?.[SUPMAP?.[ag]]||'Sin coordinador asignado';
+  const G={};
+  LAST_CONC.sospechosas.forEach(x=>{(G[coordDe(x.ag)]=G[coordDe(x.ag)]||{s:[],c:[]}).s.push(x);});
+  LAST_CONC.cruzadas.forEach(x=>{(G[coordDe(x.ag)]=G[coordDe(x.ag)]||{s:[],c:[]}).c.push(x);});
+  const hoy=new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long'});
+  box.innerHTML=Object.entries(G).map(([coord,g],i)=>{
+    let msg='🧾 *CONCILIACIÓN DE VENTAS — '+coord.toUpperCase()+'* ('+hoy+')\n';
+    msg+='Estas ventas de tu coordinación necesitan revisión HOY:\n';
+    if(g.s.length){
+      msg+='\n🚨 *Tipificadas en el CRM SIN respaldo en el reporte oficial* ('+g.s.length+'):\n';
+      const porAg={};g.s.forEach(x=>{(porAg[x.ag]=porAg[x.ag]||[]).push(x);});
+      Object.entries(porAg).forEach(([ag,xs])=>{
+        msg+='\n*'+ag+'* ('+xs.length+'):\n';
+        xs.forEach(x=>{msg+='  • '+x.l.telefono+' · folio '+x.f+(x.l.fecha_venta?' · '+fechaCorta(x.l.fecha_venta):'')+'\n';});
+      });
+    }
+    if(g.c.length){
+      msg+='\n🔁 *Folio válido pero acreditado a OTRO agente* ('+g.c.length+'):\n';
+      g.c.forEach(x=>{msg+='  • folio '+x.f+' · CRM: '+x.ag+' vs oficial: '+x.agOfi+'\n';});
+    }
+    msg+='\n👉 *Qué hacer con cada una*: revisar con el agente si el folio está mal tecleado (corregirlo en el CRM), si la venta es muy reciente (esperar el próximo reporte), o si no hay venta real (reportarlo a dirección). Cierre hoy mismo.';
+    const esc=msg.replace(/'/g,"\\'").replace(/\n/g,'\\n');
+    return `<div style="border:1px solid var(--line,#E5E7EB);border-radius:10px;margin-top:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F8FAFC">
+        <b style="flex:1">👤 ${coord}</b>
+        <span class="badge" style="background:#FEE2E2;color:#991B1B;padding:2px 8px;font-size:11px">${g.s.length} 🚨</span>
+        <span class="badge" style="background:#FEF3C7;color:#92400E;padding:2px 8px;font-size:11px">${g.c.length} 🔁</span>
+        <button class="btn btn-primary" style="padding:5px 14px;font-size:12px" onclick="navigator.clipboard.writeText('${esc}').then(()=>toast('Mensaje de ${coord} copiado — pégalo en su chat'))">📋 Copiar</button>
+      </div>
+      <pre style="margin:0;padding:12px 14px;font-size:11.5px;white-space:pre-wrap;font-family:inherit;color:#374151;max-height:220px;overflow:auto">${msg.replace(/</g,'&lt;')}</pre>
+    </div>`;
+  }).join('')||'<div class="dash-empty">Nada que repartir 🎉</div>';
+}
+function concAbrirLead(id){
+  const l=LEADS.find(x=>x.id===id);
+  if(!l)return toast('Ese lead no está en la vista actual',false);
+  setSeccion('operacion');abrirDrawer(l);
+}
+function concBuscarTel(tel){
+  if(!tel)return toast('El reporte no trae teléfono para ese folio',false);
+  setSeccion('operacion');
+  const s=$('search');if(s){s.value=tel;}
+  try{render();}catch(e){}
+  toast('Buscando '+tel+' en Operación — si no aparece, ese cliente nunca se capturó');
 }
 async function resolverPendConc(id){
   await db.from('conciliaciones_ventas').update({estado:'resuelto',resuelto_en:new Date().toISOString()}).eq('id',id);
