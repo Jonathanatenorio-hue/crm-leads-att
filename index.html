@@ -1776,6 +1776,14 @@ function mapearColumnas(rows){
       renovar:idx.renovar>=0?String(r[idx.renovar]||'').trim():'',fecha:idx.fecha>=0?r[idx.fecha]:''});}
   return datos;
 }
+async function campanasPorTelefono(tels){
+  const M={};
+  for(let i=0;i<tels.length;i+=500){
+    const {data}=await db.from('base_enviada').select('telefono,campana_id').in('telefono',tels.slice(i,i+500));
+    (data||[]).forEach(x=>{if(x.campana_id)M[x.telefono]=x.campana_id;});
+  }
+  return M;
+}
 async function procesarCarga(){
   if(!cargaFilas)return toast('Elige un archivo primero',false);
   const btn=$('btnCargar');btn.disabled=true;btn.innerHTML='<span class="loader"></span>';
@@ -1784,16 +1792,18 @@ async function procesarCarga(){
   if(!AGENTES_LISTA.length){btn.disabled=false;btn.textContent='Procesar carga';$('cargaResultado').innerHTML='<div class="dash-empty" style="color:var(--red)">No pude cargar el catálogo de agentes (¿conexión?). Reintenta en unos segundos.</div>';return;}
   const res=$('cargaResultado');res.innerHTML='';
   const datos=mapearColumnas(cargaFilas);
+  const CARGA_TELCAMP=datos&&datos.length?await campanasPorTelefono(datos.map(d=>d.tel10)):{};
   if(!datos||datos.length===0){btn.disabled=false;btn.textContent='Procesar carga';res.innerHTML='<div class="dash-empty" style="color:var(--red)">No encontré filas válidas. Revisa las columnas Campaña, Agente y Teléfono.</div>';return;}
   const tels=[...new Set(datos.map(d=>d.tel10))];
   let existentes=new Set();
   for(let i=0;i<tels.length;i+=500){const {data}=await db.from('leads').select('tel10').in('tel10',tels.slice(i,i+500));(data||[]).forEach(x=>existentes.add(x.tel10));}
   const porAgente={},noProc=[],nuevos=[],hoy=new Set();
   datos.forEach(d=>{
-    const ra=resolverAgente(d.agente),cId=CAMP_MAP[norm(d.campana)];
+    const ra=resolverAgente(d.agente);
+    const cId=CARGA_TELCAMP[d.tel10]||CAMP_MAP[norm(d.campana)];
     if(ra.estado==='ambiguo'){noProc.push({...d,motivo:'"'+d.agente+'" es ambiguo ('+ra.opciones.join(' o ')+')'});return;}
     if(ra.estado!=='ok'){noProc.push({...d,motivo:'Agente no reconocido: "'+d.agente+'"'});return;}
-    if(!cId){noProc.push({...d,motivo:'Campaña no reconocida: "'+d.campana+'"'});return;}
+    if(!cId){noProc.push({...d,motivo:'Número sin envío registrado y campaña no reconocida: "'+(d.campana||'(vacía)')+'"'});return;}
     const aId=ra.id;
     (porAgente[d.agente]=porAgente[d.agente]||{recibidos:0,yaReg:0,creados:0}).recibidos++;
     if(existentes.has(d.tel10)||hoy.has(d.tel10)){porAgente[d.agente].yaReg++;return;}
@@ -1844,9 +1854,10 @@ async function procesarRechazos(){
   const datos=mapearRechazos(rzFilas);
   if(!datos||datos.length===0){btn.disabled=false;btn.textContent='Procesar rechazos';res.innerHTML='<div class="dash-empty" style="color:var(--red)">No encontré filas válidas. Revisa columnas Campaña, Número y Motivo.</div>';return;}
   const objs=[],noProc=[];
+  const RZ_TELCAMP=await campanasPorTelefono(datos.map(d=>d.tel10));
   datos.forEach(d=>{
-    const cId=CAMP_MAP[norm(d.campana)],mId=MOTIVOS_MAP[norm(d.motivo)];
-    if(!cId){noProc.push('Campaña no reconocida: "'+d.campana+'"');return;}
+    const cId=RZ_TELCAMP[d.tel10]||CAMP_MAP[norm(d.campana)],mId=MOTIVOS_MAP[norm(d.motivo)];
+    if(!cId){noProc.push('Número sin envío registrado y campaña no reconocida: "'+(d.campana||'(vacía)')+'"');return;}
     if(!mId){noProc.push('Motivo no reconocido: "'+d.motivo+'"');return;}
     objs.push({telefono:d.tel10,campana_id:cId,motivo_id:mId,fecha_rechazo:fechaISO(d.fecha),verificado_att:/renov|no est/i.test(d.motivo),registrado_por:AGENTE.id});
   });
@@ -2838,6 +2849,16 @@ async function conciliarVentas(){
     const esDeMiPlantilla=agOfi=>CAT.some(a=>mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
     const desde=$('concDesde')?$('concDesde').value:'';
     const faltantes=Object.entries(OF).filter(([f,v])=>!usados.has(f)&&esDeMiPlantilla(v.ag)&&(!desde||!v.dia||v.dia>=desde));
+    // ── DIAGNÓSTICO DE CANAL (no altera pendientes): ¿el teléfono oficial fue lanzado en nuestras campañas? ──
+    try{
+      const telsF=[...new Set(faltantes.map(([f,v])=>v.tel).filter(t=>t&&t.length===10))];
+      const ENV=await campanasPorTelefono(telsF);
+      faltantes.forEach(([f,v])=>{
+        if(!v.tel)v.canal='?';
+        else if(ENV[v.tel]){v.canal='leads';v.campEnv=(CAMPANAS.find(c=>c.id===ENV[v.tel])||{}).nombre||'';}
+        else v.canal='otro';
+      });
+    }catch(e){}
     const fila=(cls,cont)=>`<div style="padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px;${cls}">${cont}</div>`;
     window.__concBloques={};
     const bloque=(titulo,color,items,render)=>{
@@ -2858,8 +2879,8 @@ async function conciliarVentas(){
         x=>fila('color:#991B1B;font-weight:600;cursor:pointer" onclick="concAbrirLead('+x.l.id+')',`${x.ag} · ${x.l.telefono} · folio: ${x.f} · ${x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''} <span style="float:right">✏️ corregir</span>`))+
       bloque('🔁 Folio válido pero AGENTE distinto — clic para abrir y reasignar','#FEF3C7',cruzadas,
         x=>fila('cursor:pointer" onclick="concAbrirLead('+x.l.id+')',`folio ${x.f} · CRM: <b>${x.ag}</b> vs oficial: <b>${x.agOfi}</b> · ${x.l.telefono} <span style="float:right">✏️</span>`))+
-      bloque('📄 En el oficial pero SIN tipificar en el CRM — clic para buscar al cliente por teléfono','#E0E7FF',faltantes,
-        ([f,v])=>fila('cursor:pointer" onclick="concBuscarTel(\''+(v.tel||'')+'\')',`folio ${f}${v.ag?' · '+v.ag:''}${v.tel?' · 📞 '+v.tel:''}${v.dia?' · 🗓 '+v.dia:''}${v.est?' · '+v.est:''} <span style="float:right">🔎</span>`))+
+      bloque('📄 SIN tipificar — 📬 de leads (lanzado por nosotros): '+faltantes.filter(([f,v])=>v.canal==='leads').length+' · 🌐 otro canal: '+faltantes.filter(([f,v])=>v.canal==='otro').length+(faltantes.some(([f,v])=>v.canal==='?')?' · sin teléfono: '+faltantes.filter(([f,v])=>v.canal==='?').length:''),'#E0E7FF',faltantes,
+        ([f,v])=>fila('cursor:pointer" onclick="concBuscarTel(\''+(v.tel||'')+'\')',`${v.canal==='leads'?'<span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:1px 7px">📬 de leads'+(v.campEnv?' · '+v.campEnv:'')+'</span> ':(v.canal==='otro'?'<span class="badge" style="background:#F3F4F6;color:#6B7280;font-size:10px;padding:1px 7px">🌐 otro canal</span> ':'')}folio ${f}${v.ag?' · '+v.ag:''}${v.tel?' · 📞 '+v.tel:''}${v.dia?' · 🗓 '+v.dia:''}${v.est?' · '+v.est:''} <span style="float:right">🔎</span>`))+
       bloque('🚚 Cruzadas pero con estatus EN PROCESO (se sellarán cuando el oficial diga Entregado)','#F3E8FF',enProceso,
         x=>fila('',`${x.ag} · ${x.l.telefono} · folio ${x.f} · estatus: <b>${x.est}</b>`))+
       bloque('✅ Coincidencias perfectas','#D1FAE5',ok,
@@ -2945,8 +2966,8 @@ function excelConc(){
       LAST_CONC.sospechosas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''])],
     ['🔁 Agente distinto',['Coordinación','Supervisor','Agente CRM','Agente oficial','Teléfono','Folio','Fecha oficial'],
       LAST_CONC.cruzadas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.agOfi,x.l.telefono,x.f,x.dia||''])],
-    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Fecha venta oficial','Estatus'],
-      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.dia||'',v.est||''])],
+    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Fecha venta oficial','Estatus','Canal','Campaña del envío'],
+      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.dia||'',v.est||'',v.canal==='leads'?'📬 De leads':(v.canal==='otro'?'🌐 Otro canal':'Sin teléfono'),v.campEnv||''])],
     ['🚚 En proceso',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial','Estatus oficial'],
       LAST_CONC.enProceso.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.dia||'',x.est])],
     ['✅ Conciliadas',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial'],
