@@ -2668,7 +2668,7 @@ function renderEmbudoBase(){
   }
   function nodo(x,y,hh,color){svgN+=`<rect x="${x}" y="${y}" width="${nw}" height="${hh}" rx="4" fill="${color}"/>`;}
   function lbl(x,y,lineas){lineas.forEach((t,i)=>{const o=typeof t==='object';svgN+=`<text x="${x}" y="${y+i*17}" font-family="Inter,system-ui" font-size="${i===0?'19':'12.5'}" font-weight="${i===0?'800':(i===2?'700':'600')}" fill="${i===0?'#111827':((o&&t.c)||'#6B7280')}">${o?t.t:t}</text>`;});}
-  const dotN=f=>Math.min(Math.max(Math.round(f*escala/22),1),5);
+  const dotN=f=>Math.min(Math.max(2+Math.round(h(f)/11),2),16);
   let col=0;
   let hEnv=0;
   if(conEnvio){
@@ -2678,7 +2678,7 @@ function renderEmbudoBase(){
     const hL=h(nLeads), hSR=hEnv-hL;
     ribbon(cols[0]+nw,topY,topY+hL,cols[1],topY,topY+hL,'#A5B4FC',.55,dotN(nLeads),'#6366F1');
     const drY=topY+hL+90;
-    ribbon(cols[0]+nw,topY+hL,topY+hEnv,cols[1],drY,drY+Math.max(hSR,5),'#D1D5DB',.5,0);
+    ribbon(cols[0]+nw,topY+hL,topY+hEnv,cols[1],drY,drY+Math.max(hSR,5),'#D1D5DB',.5,Math.min(dotN(enviados-nLeads),8),'#9CA3AF');
     nodo(cols[1],drY,Math.max(hSR,5),'#9CA3AF');
     lbl(cols[1]+nw+10,drY+18,[String(enviados-nLeads),'Sin respuesta',{t:pct(enviados-nLeads,enviados)+' de enviados',c:'#6B7280'}]);
     col=1;
@@ -2693,19 +2693,22 @@ function renderEmbudoBase(){
   const yNo=topY+hV+70;
   if(nNo>0){ribbon(xL+nw,syo,syo+hN,xV,yNo,yNo+hN,'#FECACA',.7,dotN(nNo),'#EF4444');syo+=hN;}
   const ySin=yNo+hN+70;
-  if(nSin>0){ribbon(xL+nw,syo,syo+hS,xV,ySin,ySin+hS,'#FDE68A',.7,0);}
+  if(nSin>0){ribbon(xL+nw,syo,syo+hS,xV,ySin,ySin+hS,'#FDE68A',.7,2,'#F59E0B');}
   nodo(xV,topY,hV,'#5B5FC7');
   lbl(xV+nw+10,topY+22,[String(nViab),'Viables',{t:pct(nViab,nLeads)+' de leads',c:'#5B5FC7'}]);
   if(nNo>0){nodo(xV,yNo,hN,'#EF4444');lbl(xV+nw+10,yNo+18,[String(nNo),'No viables',{t:pct(nNo,nLeads)+' de leads',c:'#DC2626'}]);}
   if(nSin>0){nodo(xV,ySin,hS,'#F59E0B');lbl(xV+nw+10,ySin+18,[String(nSin),'Sin evaluar',{t:pct(nSin,nLeads)+' de leads',c:'#B45309'}]);}
   const xE=cols[col+2];
+  const SLOT=60;
   let syE=topY, tyE=topY;
   ends.forEach(([et,n])=>{
     const hh=h(n), color=ETAPA_COLOR[et]||'#6366F1';
-    ribbon(xV+nw,syE,syE+hh,xE,tyE,tyE+hh,color,.32,dotN(n),color);
-    nodo(xE,tyE,hh,color);
-    lbl(xE+nw+10,tyE+15,[String(n),{t:et,c:'#374151'},{t:pct(n,nViab)+' de viables',c:color}]);
-    syE+=hh;tyE+=hh+GAP;
+    const carril=Math.max(hh,SLOT);
+    const ny=tyE+(carril-hh)/2;
+    ribbon(xV+nw,syE,syE+hh,xE,ny,ny+hh,color,.32,dotN(n),color);
+    nodo(xE,ny,hh,color);
+    lbl(xE+nw+10,tyE+18,[String(n),{t:et,c:'#374151'},{t:pct(n,nViab)+' de viables',c:color}]);
+    syE+=hh;tyE+=carril+10;
   });
   const H=Math.max(tyE,ySin+hS+60,conEnvio?topY+hEnv+40:0,420)+20;
   wrap.innerHTML=`<svg viewBox="0 0 ${W+230} ${H}" style="min-width:900px;width:100%;font-family:Inter,system-ui"><defs>${defs}</defs>${svgL}${svgN}${svgD}</svg>`;
