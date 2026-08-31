@@ -311,6 +311,7 @@ tbody tr:hover{background:#F7F8FF}
     <div id="acelChip" class="hidden" style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:inline-block"></div>
     <div class="toolbar">
       <div class="search"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="search" type="text" placeholder="Buscar por teléfono o nombre…"></div>
+      <div id="opCount" style="font-size:12.5px;color:#6B7280;white-space:nowrap;align-self:center"></div>
       <div class="selectwrap"><select id="filterEstado">
         <option value="__vender__">🎯 Para vender (sin caídos ni no viables)</option>
         <option value="">Todos los estados</option><option value="sin">Sin evaluar</option>
@@ -337,6 +338,7 @@ tbody tr:hover{background:#F7F8FF}
       <div class="tbl-scroll"><table><thead><tr>
         <th>Teléfono</th><th>Cliente</th><th class="col-agente hidden">Agente</th><th>Campaña</th><th>Viabilidad</th><th>Etapa</th><th>Registrado</th>
       </tr></thead><tbody id="tbody"></tbody></table></div>
+      <div id="opPag" style="display:none;gap:10px;align-items:center;justify-content:center;padding:10px"></div>
       <div id="empty" class="empty hidden">
         <div class="ico"><svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5a1 1 0 011-1z"/></svg></div>
         <h3>Aún no tienes leads</h3><p>Cuando te caiga una respuesta de WhatsApp, regístrala aquí para no perderla.</p>
@@ -1148,9 +1150,27 @@ function render(){
   $('kVentas').textContent=vent;$('kConv').textContent=viabVend>0?Math.round(vent/viabVend*100)+'%':'—';
   const _kcf=$('kConvFoot');if(_kcf)_kcf.textContent='sobre vendibles';
   const tb=$('tbody');tb.innerHTML='';
+  // ── contador de resultados del filtro + paginación 20 en 20 ──
+  const _sig=[term,est,agF,[...etSet].join(','),KPI_SUB||'',ACEL_SUB||'',ordF].join('|');
+  if(_sig!==OP_SIG){OP_SIG=_sig;OP_PAGE=1;}
+  const _tot=rows.length,_pags=Math.max(Math.ceil(_tot/OP_TAM),1);
+  if(OP_PAGE>_pags)OP_PAGE=_pags;
+  const _ctr=$('opCount');
+  if(_ctr)_ctr.innerHTML=_tot===LEADS.length
+    ?`<b>${_tot.toLocaleString('es-MX')}</b> leads`
+    :`<b>${_tot.toLocaleString('es-MX')}</b> de ${LEADS.length.toLocaleString('es-MX')} leads con este filtro`;
+  const _pgW=$('opPag');
+  if(_pgW){
+    if(_tot>OP_TAM){
+      _pgW.innerHTML=`<button class="btn btn-ghost" style="padding:4px 10px" ${OP_PAGE<=1?'disabled':''} onclick="OP_PAGE--;render()">‹ Anterior</button>
+        <span style="font-size:12.5px;color:#6B7280">página <b>${OP_PAGE}</b> de <b>${_pags}</b></span>
+        <button class="btn btn-ghost" style="padding:4px 10px" ${OP_PAGE>=_pags?'disabled':''} onclick="OP_PAGE++;render()">Siguiente ›</button>`;
+      _pgW.style.display='flex';
+    }else _pgW.style.display='none';
+  }
   if(rows.length===0){show($('empty'));const _t1=document.querySelector('#seccion-leads table')||document.querySelector('table');if(_t1)_t1.style.display='none';return;}
   hide($('empty'));const _t2=document.querySelector('#seccion-leads table')||document.querySelector('table');if(_t2)_t2.style.display='';
-  rows.forEach(l=>{
+  rows.slice(OP_TAM*(OP_PAGE-1),OP_TAM*OP_PAGE).forEach(l=>{
     const tr=document.createElement('tr');tr.onclick=()=>abrirDrawer(l);
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
@@ -1675,6 +1695,7 @@ function setSeccion(s){
   if(s==='dashboard') renderDashboard();
 }
 let AGENTES_MAP={}, CAMP_MAP={}, AGENTES_LISTA=[], MOTIVOS_MAP={}, CENTROMAP={}, SUPCOORD={}, CAIDOS_DIA={}, CAIDOS_DET=[], cargaFilas=null, rzFilas=null;
+let OP_PAGE=1, OP_SIG='', OP_TAM=20;
 // Resuelve un nombre de agente escrito en el Excel: exacto -> único que empieza igual -> único que contiene
 function resolverAgente(txt){
   const q=norm(txt);
@@ -2789,7 +2810,13 @@ async function conciliarVentas(){
     const desde=$('concDesde')?$('concDesde').value:'';
     const faltantes=Object.entries(OF).filter(([f,v])=>!usados.has(f)&&esDeMiPlantilla(v.ag)&&(!desde||!v.dia||v.dia>=desde));
     const fila=(cls,cont)=>`<div style="padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px;${cls}">${cont}</div>`;
-    const bloque=(titulo,color,items,render)=>items.length?`<details ${titulo.includes('🚨')||titulo.includes('🔁')?'open':''} style="margin-top:10px;border:1px solid var(--line,#E5E7EB);border-radius:10px;overflow:hidden"><summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:${color}">${titulo} (${items.length})</summary>${items.map(render).join('')}</details>`:'';
+    window.__concBloques={};
+    const bloque=(titulo,color,items,render)=>{
+      if(!items.length)return '';
+      const bid='cb'+Object.keys(window.__concBloques).length;
+      window.__concBloques[bid]={items,render,pag:1};
+      return `<details ${titulo.includes('🚨')||titulo.includes('🔁')?'open':''} style="margin-top:10px;border:1px solid var(--line,#E5E7EB);border-radius:10px;overflow:hidden"><summary style="padding:10px 14px;font-weight:700;cursor:pointer;background:${color}">${titulo} (${items.length})</summary><div id="${bid}">${pintaBloque(bid)}</div></details>`;
+    };
     out.innerHTML=
       `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
         <div class="chip" style="background:#D1FAE5;border-radius:8px;padding:8px 14px"><b style="font-size:20px">${ok.length}</b> ✅ coinciden</div>
@@ -2833,23 +2860,44 @@ async function conciliarVentas(){
     }catch(e){console.warn('persistencia conciliación:',e.message);}
   }catch(e){out.innerHTML='<div class="dash-empty">Error leyendo el archivo: '+e.message+'</div>';}
 }
-async function cargarPendConc(){
+let PC_PAGE=1;
+async function cargarPendConc(pag){
+  if(pag)PC_PAGE=pag;
   const box=$('concPendBox');if(!box)return;
   try{
-    const {data}=await db.from('conciliaciones_ventas').select('*').eq('estado','pendiente').order('creado_en',{ascending:false}).limit(300);
+    const {data}=await db.from('conciliaciones_ventas').select('*').eq('estado','pendiente').order('creado_en',{ascending:false}).limit(1000);
     const P=data||[];
     if(!P.length){box.innerHTML='<div class="hint" style="font-size:12px;color:#065F46;margin-top:8px">✅ Sin pendientes de conciliación — todo cuadra.</div>';return;}
+    const _pgs=Math.max(Math.ceil(P.length/20),1);
+    if(PC_PAGE>_pgs)PC_PAGE=_pgs;
+    const Pv=P.slice(20*(PC_PAGE-1),20*PC_PAGE);
     const TIPO={sin_respaldo:['🚨 Sin respaldo oficial','#FEE2E2;color:#991B1B'],agente_distinto:['🔁 Agente distinto','#FEF3C7;color:#92400E'],sin_tipificar:['📄 Oficial sin tipificar','#E0E7FF;color:#3730A3']};
-    box.innerHTML='<div style="font-weight:700;margin-top:12px">📌 Pendientes por corregir ('+P.length+')</div>'+
-      P.map(p=>{const t=TIPO[p.tipo]||['?',''];
+    box.innerHTML='<div style="font-weight:700;margin-top:12px">📌 Pendientes por corregir ('+P.length+')'+(_pgs>1?' <span style="font-weight:400;font-size:12px;color:#6B7280">· página '+PC_PAGE+' de '+_pgs+'</span>':'')+'</div>'+
+      Pv.map(p=>{const t=TIPO[p.tipo]||['?',''];
         return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-size:12.5px">
           <span class="badge" style="font-size:10px;padding:2px 8px;background:${t[1]}">${t[0]}</span>
           <span style="flex:1;cursor:pointer" onclick="${p.lead_id?'concAbrirLead('+p.lead_id+')':'concBuscarTel(\''+String((p.detalle||'').match(/\d{10}/)?.[0]||'')+'\')'}">folio <b>${p.folio}</b>${p.agente_crm?' · CRM: '+p.agente_crm:''}${p.agente_oficial?' · oficial: '+p.agente_oficial:''}${p.detalle?' · '+p.detalle:''} ✏️</span>
           <button class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="resolverPendConc(${p.id})">✔ Resuelto</button>
-        </div>`;}).join('');
+        </div>`;}).join('')+
+      (_pgs>1?`<div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:10px">
+        <button class="btn btn-ghost" style="padding:4px 10px" ${PC_PAGE<=1?'disabled':''} onclick="cargarPendConc(${PC_PAGE-1})">‹ Anterior</button>
+        <span style="font-size:12.5px;color:#6B7280">página <b>${PC_PAGE}</b> de <b>${_pgs}</b></span>
+        <button class="btn btn-ghost" style="padding:4px 10px" ${PC_PAGE>=_pgs?'disabled':''} onclick="cargarPendConc(${PC_PAGE+1})">Siguiente ›</button>
+      </div>`:'');
   }catch(e){box.innerHTML='<div class="hint" style="font-size:12px;color:#B45309">La bandeja de pendientes necesita el SQL 31 (tabla conciliaciones_ventas).</div>';}
 }
 let LAST_CONC=null;
+function pintaBloque(bid){
+  const b=window.__concBloques[bid];if(!b)return '';
+  const pgs=Math.max(Math.ceil(b.items.length/20),1);
+  if(b.pag>pgs)b.pag=pgs;
+  return b.items.slice(20*(b.pag-1),20*b.pag).map(b.render).join('')+
+    (pgs>1?`<div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:8px;background:#FAFAFA">
+      <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px" ${b.pag<=1?'disabled':''} onclick="window.__concBloques['${bid}'].pag--;document.getElementById('${bid}').innerHTML=pintaBloque('${bid}')">‹</button>
+      <span style="font-size:12px;color:#6B7280">página <b>${b.pag}</b> de <b>${pgs}</b> · ${b.items.length} registros</span>
+      <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px" ${b.pag>=pgs?'disabled':''} onclick="window.__concBloques['${bid}'].pag++;document.getElementById('${bid}').innerHTML=pintaBloque('${bid}')">›</button>
+    </div>`:'');
+}
 function repartirConc(){
   if(!LAST_CONC)return;
   const box=$('concReparto');
