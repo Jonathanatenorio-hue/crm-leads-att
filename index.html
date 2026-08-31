@@ -2195,6 +2195,13 @@ async function renderDashboard(){
         </div>
       </div>`;
     }catch(e){return '';}})()}
+    ${['director','coordinador'].includes(AGENTE.rol)?`<div class="dash-card" style="margin-top:16px"><h3>🌊 Embudo de la base</h3>
+      <div class="dc-sub">De cada paso, cuántos siguieron al siguiente y cuántos se quedaron en el camino — hasta la etapa actual de cada lead.</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+        <select id="embCamp" style="min-width:220px"><option value="">🌎 Vista global (todas las campañas)</option></select>
+      </div>
+      <div id="embudoBaseWrap" style="margin-top:12px;overflow-x:auto"></div>
+    </div>`:''}
     ${AGENTE.rol==='director'?`<div class="dash-card"><h3>♻️ Reciclaje de base</h3><div class="dc-sub">Extrae los leads de una etapa para re-trabajarlos y márcalos como reciclados</div>
       <div class="recycle-box">
         <select id="recEtapa"><option value="Lead caído">Lead caído</option><option value="Inicio de negociación">Inicio de negociación</option><option value="Cotización enviada">Cotización enviada</option><option value="Aceleración pendiente">Aceleración pendiente</option><option value="Falta INE o biométrico">Falta INE o biométrico</option><option value="Falta contrato firmado">Falta contrato firmado</option><option value="Falta pago inicial">Falta pago inicial</option></select>
@@ -2235,6 +2242,7 @@ async function renderDashboard(){
 
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
+  try{wireEmbudoBase();}catch(e){}
   const _r5=$('btnRankTop5');if(_r5)_r5.onclick=()=>generarRanking('top5');
   const _rf=$('btnRankFull');if(_rf)_rf.onclick=()=>generarRanking('full');
   const _rx=$('btnRepXls');if(_rx)_rx.onclick=exportTabla;
@@ -2623,6 +2631,92 @@ tr.zero .v{color:#B9C2CE}tr.zero td.name{color:var(--grey)}
   const w=window.open('','_blank');
   if(!w)return toast('Tu navegador bloqueó la ventana — permite pop-ups para el CRM',false);
   w.document.write(doc);w.document.close();
+}
+const ETAPA_COLOR={'Venta exitosa':'#16A34A','Lead caído':'#DC2626','Cotización enviada':'#F59E0B','Aceleración pendiente':'#0EA5E9','Falta INE o biométrico':'#8B5CF6','Falta contrato firmado':'#8B5CF6','Falta pago inicial':'#8B5CF6','Interesado (sin cumplir año)':'#EC4899','En espera de lanzamiento':'#06B6D4','Línea adicional':'#84CC16','Adeudo mensualidad':'#F97316','Inicio de negociación':'#6366F1','Sin trabajar':'#9CA3AF'};
+function renderEmbudoBase(){
+  const wrap=$('embudoBaseWrap');if(!wrap)return;
+  const campSel=$('embCamp')?$('embCamp').value:'';
+  const L=LEADS.filter(l=>!campSel||String(l.campana_id)===campSel);
+  const camp=campSel?CAMPANAS.find(c=>String(c.id)===campSel):null;
+  const enviados=AGENTE.rol==='director'?(campSel?(camp?.mensajes_enviados||0):CAMPANAS.reduce((s,c)=>s+(c.mensajes_enviados||0),0)):0;
+  const nLeads=L.length;
+  if(!nLeads){wrap.innerHTML='<div class="dash-empty">Sin leads con este filtro.</div>';return;}
+  const nViab=L.filter(l=>l.viabilidad==='VIABLE').length;
+  const nNo=L.filter(l=>l.viabilidad==='NO VIABLE').length;
+  const nSin=nLeads-nViab-nNo;
+  const ET={};L.forEach(l=>{if(l.viabilidad!=='VIABLE')return;const e=l.etapa||'Sin trabajar';ET[e]=(ET[e]||0)+1;});
+  const ends=Object.entries(ET).sort((a,b)=>b[1]-a[1]);
+  const conEnvio=enviados>=nLeads&&enviados>0;
+  const pct=(a,b)=>b>0?(Math.round(a/b*1000)/10).toFixed(1)+'%':'—';
+  const cols=conEnvio?[60,340,620,930]:[60,380,930];
+  const W=1180, nw=13, topY=46;
+  const escala=280/Math.max(conEnvio?enviados:nLeads,1);
+  const h=v=>Math.max(v*escala,4);
+  const GAP=26;
+  let svgN='',svgL='',svgD='',defs='',pid=0;
+  function ribbon(x1,sy0,sy1,x2,ty0,ty1,color,op,dots,dotColor){
+    const m=(x1+x2)/2;
+    svgL+=`<path d="M ${x1} ${sy0} C ${m} ${sy0} ${m} ${ty0} ${x2} ${ty0} L ${x2} ${ty1} C ${m} ${ty1} ${m} ${sy1} ${x1} ${sy1} Z" fill="${color}" opacity="${op}"/>`;
+    if(dots>0){
+      const id='emp'+(++pid);
+      defs+=`<path id="${id}" d="M ${x1} ${(sy0+sy1)/2} C ${m} ${(sy0+sy1)/2} ${m} ${(ty0+ty1)/2} ${x2} ${(ty0+ty1)/2}" fill="none"/>`;
+      for(let i=0;i<dots;i++){
+        const dur=(4.5+Math.random()*3.5).toFixed(1);
+        svgD+=`<circle r="3.2" fill="${dotColor}" opacity=".85"><animateMotion dur="${dur}s" begin="-${(Math.random()*dur).toFixed(1)}s" repeatCount="indefinite"><mpath href="#${id}"/></animateMotion></circle>`;
+      }
+    }
+  }
+  function nodo(x,y,hh,color){svgN+=`<rect x="${x}" y="${y}" width="${nw}" height="${hh}" rx="4" fill="${color}"/>`;}
+  function lbl(x,y,lineas){lineas.forEach((t,i)=>{const o=typeof t==='object';svgN+=`<text x="${x}" y="${y+i*17}" font-family="Inter,system-ui" font-size="${i===0?'19':'12.5'}" font-weight="${i===0?'800':(i===2?'700':'600')}" fill="${i===0?'#111827':((o&&t.c)||'#6B7280')}">${o?t.t:t}</text>`;});}
+  const dotN=f=>Math.min(Math.max(Math.round(f*escala/22),1),5);
+  let col=0;
+  let hEnv=0;
+  if(conEnvio){
+    hEnv=h(enviados);
+    nodo(cols[0],topY,hEnv,'#5B5FC7');
+    lbl(cols[0]+nw+10,topY+22,[String(enviados),'Mensajes enviados',{t:'100.0% de la base',c:'#5B5FC7'}]);
+    const hL=h(nLeads), hSR=hEnv-hL;
+    ribbon(cols[0]+nw,topY,topY+hL,cols[1],topY,topY+hL,'#A5B4FC',.55,dotN(nLeads),'#6366F1');
+    const drY=topY+hL+90;
+    ribbon(cols[0]+nw,topY+hL,topY+hEnv,cols[1],drY,drY+Math.max(hSR,5),'#D1D5DB',.5,0);
+    nodo(cols[1],drY,Math.max(hSR,5),'#9CA3AF');
+    lbl(cols[1]+nw+10,drY+18,[String(enviados-nLeads),'Sin respuesta',{t:pct(enviados-nLeads,enviados)+' de enviados',c:'#6B7280'}]);
+    col=1;
+  }
+  const xL=cols[col], hLd=h(nLeads);
+  nodo(xL,topY,hLd,'#5B5FC7');
+  lbl(xL+nw+10,topY+22,[String(nLeads),'Respondieron (leads)',{t:conEnvio?pct(nLeads,enviados)+' de enviados':'100.0% de la base',c:'#5B5FC7'}]);
+  const xV=cols[col+1];
+  const hV=h(nViab), hN=h(nNo), hS=h(nSin);
+  let syo=topY;
+  ribbon(xL+nw,syo,syo+hV,xV,topY,topY+hV,'#A5B4FC',.55,dotN(nViab),'#6366F1');syo+=hV;
+  const yNo=topY+hV+70;
+  if(nNo>0){ribbon(xL+nw,syo,syo+hN,xV,yNo,yNo+hN,'#FECACA',.7,dotN(nNo),'#EF4444');syo+=hN;}
+  const ySin=yNo+hN+70;
+  if(nSin>0){ribbon(xL+nw,syo,syo+hS,xV,ySin,ySin+hS,'#FDE68A',.7,0);}
+  nodo(xV,topY,hV,'#5B5FC7');
+  lbl(xV+nw+10,topY+22,[String(nViab),'Viables',{t:pct(nViab,nLeads)+' de leads',c:'#5B5FC7'}]);
+  if(nNo>0){nodo(xV,yNo,hN,'#EF4444');lbl(xV+nw+10,yNo+18,[String(nNo),'No viables',{t:pct(nNo,nLeads)+' de leads',c:'#DC2626'}]);}
+  if(nSin>0){nodo(xV,ySin,hS,'#F59E0B');lbl(xV+nw+10,ySin+18,[String(nSin),'Sin evaluar',{t:pct(nSin,nLeads)+' de leads',c:'#B45309'}]);}
+  const xE=cols[col+2];
+  let syE=topY, tyE=topY;
+  ends.forEach(([et,n])=>{
+    const hh=h(n), color=ETAPA_COLOR[et]||'#6366F1';
+    ribbon(xV+nw,syE,syE+hh,xE,tyE,tyE+hh,color,.32,dotN(n),color);
+    nodo(xE,tyE,hh,color);
+    lbl(xE+nw+10,tyE+15,[String(n),{t:et,c:'#374151'},{t:pct(n,nViab)+' de viables',c:color}]);
+    syE+=hh;tyE+=hh+GAP;
+  });
+  const H=Math.max(tyE,ySin+hS+60,conEnvio?topY+hEnv+40:0,420)+20;
+  wrap.innerHTML=`<svg viewBox="0 0 ${W+230} ${H}" style="min-width:900px;width:100%;font-family:Inter,system-ui"><defs>${defs}</defs>${svgL}${svgN}${svgD}</svg>`;
+}
+function wireEmbudoBase(){
+  const s=$('embCamp');if(!s)return;
+  const val=s.value;
+  s.innerHTML='<option value="">🌎 Vista global (todas las campañas)</option>'+CAMPANAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  s.value=val;
+  s.onchange=renderEmbudoBase;
+  renderEmbudoBase();
 }
 function generarRepFechas(){
   const d1=$('repD1').value, d2=$('repD2').value||d1;
