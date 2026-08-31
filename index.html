@@ -2829,9 +2829,10 @@ async function conciliarVentas(){
       usados.add(f);
       const agOfi=OF[f].ag, estOfi=OF[f].est;
       const compl=(typeof AGPORID!=='undefined'&&Object.values(AGPORID).find(x=>x.nombre===ag)?.nombre_completo)||'';
-      if(!mismoAgente(agOfi,ag,compl))cruzadas.push({l,f:f+sufijo,ag,agOfi,est:estOfi});
-      else if(esFirme(estOfi))ok.push({l,f:f+sufijo,ag});
-      else enProceso.push({l,f:f+sufijo,ag,est:estOfi||'(sin estatus)'});
+      const diaOfi=OF[f].dia||'';
+      if(!mismoAgente(agOfi,ag,compl))cruzadas.push({l,f:f+sufijo,ag,agOfi,est:estOfi,dia:diaOfi});
+      else if(esFirme(estOfi))ok.push({l,f:f+sufijo,ag,dia:diaOfi});
+      else enProceso.push({l,f:f+sufijo,ag,est:estOfi||'(sin estatus)',dia:diaOfi});
     });
     const CAT=(typeof AGPORID!=='undefined')?Object.values(AGPORID).filter(a=>a.rol==='agente'):[];
     const esDeMiPlantilla=agOfi=>CAT.some(a=>mismoAgente(agOfi,a.nombre,a.nombre_completo||''));
@@ -2858,7 +2859,7 @@ async function conciliarVentas(){
       bloque('🔁 Folio válido pero AGENTE distinto — clic para abrir y reasignar','#FEF3C7',cruzadas,
         x=>fila('cursor:pointer" onclick="concAbrirLead('+x.l.id+')',`folio ${x.f} · CRM: <b>${x.ag}</b> vs oficial: <b>${x.agOfi}</b> · ${x.l.telefono} <span style="float:right">✏️</span>`))+
       bloque('📄 En el oficial pero SIN tipificar en el CRM — clic para buscar al cliente por teléfono','#E0E7FF',faltantes,
-        ([f,v])=>fila('cursor:pointer" onclick="concBuscarTel(\''+(v.tel||'')+'\')',`folio ${f}${v.ag?' · '+v.ag:''}${v.tel?' · 📞 '+v.tel:''}${v.est?' · '+v.est:''} <span style="float:right">🔎</span>`))+
+        ([f,v])=>fila('cursor:pointer" onclick="concBuscarTel(\''+(v.tel||'')+'\')',`folio ${f}${v.ag?' · '+v.ag:''}${v.tel?' · 📞 '+v.tel:''}${v.dia?' · 🗓 '+v.dia:''}${v.est?' · '+v.est:''} <span style="float:right">🔎</span>`))+
       bloque('🚚 Cruzadas pero con estatus EN PROCESO (se sellarán cuando el oficial diga Entregado)','#F3E8FF',enProceso,
         x=>fila('',`${x.ag} · ${x.l.telefono} · folio ${x.f} · estatus: <b>${x.est}</b>`))+
       bloque('✅ Coincidencias perfectas','#D1FAE5',ok,
@@ -2942,14 +2943,14 @@ function excelConc(){
   const hojas=[
     ['🚨 Sin respaldo',['Coordinación','Supervisor','Agente','Teléfono','Folio CRM','Fecha venta CRM'],
       LAST_CONC.sospechosas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.l.fecha_venta?fechaCorta(x.l.fecha_venta):''])],
-    ['🔁 Agente distinto',['Coordinación','Supervisor','Agente CRM','Agente oficial','Teléfono','Folio'],
-      LAST_CONC.cruzadas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.agOfi,x.l.telefono,x.f])],
-    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Estatus'],
-      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.est||''])],
-    ['🚚 En proceso',['Coordinación','Supervisor','Agente','Teléfono','Folio','Estatus oficial'],
-      LAST_CONC.enProceso.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.est])],
-    ['✅ Conciliadas',['Coordinación','Supervisor','Agente','Teléfono','Folio'],
-      LAST_CONC.ok.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f])],
+    ['🔁 Agente distinto',['Coordinación','Supervisor','Agente CRM','Agente oficial','Teléfono','Folio','Fecha oficial'],
+      LAST_CONC.cruzadas.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.agOfi,x.l.telefono,x.f,x.dia||''])],
+    ['📄 Sin tipificar',['Coordinación','Agente oficial','Teléfono cliente','Folio','Fecha venta oficial','Estatus'],
+      LAST_CONC.faltantes.filter(([f,v])=>!alcance||coordDeOficial(v.ag)===alcance).map(([f,v])=>[coordDeOficial(v.ag),v.ag||'',v.tel||'',f,v.dia||'',v.est||''])],
+    ['🚚 En proceso',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial','Estatus oficial'],
+      LAST_CONC.enProceso.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.dia||'',x.est])],
+    ['✅ Conciliadas',['Coordinación','Supervisor','Agente','Teléfono','Folio','Fecha oficial'],
+      LAST_CONC.ok.filter(F).map(x=>[coordDe(x.ag),supDe(x.ag),x.ag,x.l.telefono,x.f,x.dia||''])],
   ];
   const wb=XLSX.utils.book_new();
   const hoy=new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
