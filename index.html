@@ -5053,7 +5053,14 @@ async function abrirCotizador(lead){
 function cotBuscarEquipos(q){
   const term=norm(q);const cont=$('cotResultados');
   if(!term||term.length<2){cont.innerHTML='';return;}
-  const res=state.devices.filter(d=>isVigente(d)&&norm(d.equipo+' '+(d.marca||'')).includes(term)).slice(0,8);
+  // Búsqueda por palabras EN CUALQUIER ORDEN: "Xiaomi Redmi 17" = "Redmi Note 17 ... Xiaomi"
+  const toks=term.split(/\s+/).filter(Boolean);
+  const coincide=d=>{const hay=norm(d.equipo+' '+(d.marca||''));return toks.every(t=>hay.includes(t));};
+  const res=state.devices.filter(d=>isVigente(d)&&coincide(d)).slice(0,8);
+  if(!res.length){
+    const noVig=state.devices.filter(d=>!isVigente(d)&&coincide(d)).length;
+    if(noVig){cont.innerHTML='<div class="hint">⚠️ Hay '+noVig+' coincidencia(s) pero FUERA DE VIGENCIA en la lista cargada — revisa fechas de la lista de precios o recárgala en Carga del día.</div>';return;}
+  }
   cont.innerHTML=res.length?res.map(d=>`<button type="button" class="btn btn-ghost cotDev" data-id="${d.id}" style="justify-content:space-between;text-align:left;padding:8px 12px">
     <span><b>${d.equipo}</b> <span class="muted-cell" style="font-size:11px">${d.marca||''} · ${d.oferta}</span></span>
     <span class="muted-cell" style="font-size:11px">$${(d.precioContado||0).toLocaleString('es-MX')}</span></button>`).join('')
