@@ -314,6 +314,7 @@ tbody tr:hover{background:#F7F8FF}
       <div id="opCount" style="font-size:12.5px;color:#6B7280;white-space:nowrap;align-self:center"></div>
       <div class="selectwrap"><select id="filterEstado">
         <option value="__vender__">🎯 Para vender (sin ventas, caídos ni no viables)</option>
+        <option value="__heredados__">🔁 Heredados (reasignados a mí)</option>
         <option value="">Todos los estados</option><option value="sin">Sin evaluar</option>
         <option value="VIABLE">Viables</option><option value="NO VIABLE">No viables</option>
         <option value="Venta exitosa">Ventas</option><option value="Lead caído">Caídos</option>
@@ -1139,6 +1140,7 @@ function render(){
     }
     if(kpiF&&!kpiF(l))return false;
     if(est==='__vender__'&&!(l.viabilidad==='VIABLE'&&l.etapa!=='Lead caído'&&l.etapa!=='Venta exitosa'))return false;
+    if(est==='__heredados__'&&!l.heredado_de)return false;
     if(est==='sin'&&l.viabilidad)return false;
     if(est==='VIABLE'&&l.viabilidad!=='VIABLE')return false;
     if(est==='NO VIABLE'&&l.viabilidad!=='NO VIABLE')return false;
@@ -1198,6 +1200,7 @@ function render(){
     const agCell=ES_STAFF?`<td class="col-agente muted-cell">${l.agentes?.nombre||'—'}</td>`:'';
     const comTxt=[l._nota?('📝 Última nota: '+l._nota):null,l.comentarios?('Comentario: '+l.comentarios):null].filter(Boolean).join('\n');
     const comTip=comTxt?' <span title="'+comTxt.replace(/"/g,'&quot;').replace(/</g,'&lt;')+'" style="cursor:help;font-size:12px">💬</span>':'';
+    const herChip=l.heredado_de?' <span class="badge" style="font-size:10px;padding:2px 7px;background:#EDE9FE;color:#5B21B6" title="Heredado de '+String(l.heredado_de).replace(/"/g,'&quot;')+(l.heredado_en?' el '+fechaCorta(l.heredado_en):'')+'">🔁 '+String(l.heredado_de).split(' ')[0]+'</span>':'';
     const concChip=l.etapa==='Venta exitosa'?(l.venta_conciliada_en?' <span class="badge" style="font-size:10px;padding:2px 7px;background:#DBEAFE;color:#1D4ED8" title="Conciliada contra el reporte oficial el '+fechaCorta(l.venta_conciliada_en)+'">🧾✓</span>':' <span class="badge" style="font-size:10px;padding:2px 7px;background:#F3F4F6;color:#6B7280" title="Aún sin cruzar contra el reporte oficial">🕓</span>'):'';
     const _hoyIso=isoLocal(new Date());
     const pcChip=l.proximo_contacto&&!['Venta exitosa','Lead caído'].includes(l.etapa||'')?
@@ -1210,7 +1213,7 @@ function render(){
     const segChip=(_refG&&!['Venta exitosa','Lead caído'].includes(l.etapa||''))?(segHoy
       ?' <span class="badge" style="background:#D1FAE5;color:#065F46;font-size:10px;padding:2px 7px" title="Gestionado hoy">✓ hoy</span>'
       :' <span class="badge" style="background:#F3F4F6;color:#6B7280;font-size:10px;padding:2px 7px" title="Última gestión">✓ '+fechaCorta(new Date(_refG))+'</span>'):'';
-    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+concChip+anChip+lzChip;
+    const marcas=(l.lead_padre_id?' <span title="Lead derivado (línea adicional)" style="font-size:12px">🔗</span>':'')+(l.archivado?' <span title="Archivado" style="font-size:12px">🗄</span>':'')+comTip+segChip+pcChip+concChip+herChip+anChip+lzChip;
     tr.innerHTML=`<td class="tel">${l.telefono||'—'}${marcas}</td><td>${l.nombre||'<span class="muted-cell">Sin nombre</span>'}</td>
       ${agCell}<td class="muted-cell">${l.campanas?.nombre||'—'}</td><td>${viabBadge(l.viabilidad,l)}</td>
       <td>${etapaBadge(l.etapa)}</td><td class="muted-cell">${fechaCorta(l.creado_en)}${l.etapa==='Venta exitosa'&&l.fecha_venta?`<div style="color:#16A34A;font-weight:700;font-size:11.5px;white-space:nowrap">💰 Vendido ${fechaCorta(l.fecha_venta)}</div>`:''}</td>`;
