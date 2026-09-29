@@ -846,8 +846,7 @@ async function cargarLeads(){
     }
     LEADS.forEach(l=>{const x=nm[l.id];l._nota=x?x.nota:null;l._notaFecha=x?x.fecha:null;});
   }catch(e){}
-  if(ES_STAFF){const fa=$('filterAgente');const cur=fa.value;const set={};LEADS.forEach(l=>{if(l.agentes?.nombre)set[l.agente_id]=l.agentes.nombre;});
-    fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((a,b)=>a[1].localeCompare(b[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');fa.value=cur;
+  if(ES_STAFF){poblarFiltroAgente();
     // filtros de estructura: centro / supervisor / coordinación
     const rolYo=AGENTE.rol;
     const agEnVista=new Set(LEADS.map(l=>l.agente_id));
@@ -5278,8 +5277,26 @@ $('search').addEventListener('input',refrescar);$('filterEstado').addEventListen
 if($('etOpciones'))$('etOpciones').addEventListener('change',()=>{ACEL_SUB=null;KPI_SUB=null;etEtiqueta();render();});
 if($('etLimpiar'))$('etLimpiar').addEventListener('click',()=>{etSoltar([]);ACEL_SUB=null;render();});
 document.addEventListener('click',e=>{const w=$('etWrap');if(w&&!w.contains(e.target))$('etPanel').classList.add('hidden');});$('sortLeads').addEventListener('change',()=>{try{localStorage.setItem('crm_sort',$('sortLeads').value);}catch(e){}render();});
+function poblarFiltroAgente(){
+  // El menú de agentes respeta los filtros de estructura activos (centro/supervisor/coordinación);
+  // sin filtros = todos. Si el agente elegido queda fuera del recorte, se limpia solo.
+  const fa=$('filterAgente');if(!fa)return;
+  const cur=fa.value;
+  const supF=$('fSup')?$('fSup').value:'',cenF=$('fCentro')?$('fCentro').value:'',cooF=$('fCoord')?$('fCoord').value:'';
+  const set={};
+  LEADS.forEach(l=>{
+    if(!l.agentes?.nombre)return;
+    const a=AGPORID?.[l.agente_id]||{};
+    if(supF&&a.supervisor!==supF)return;
+    if(cenF&&a.centro!==cenF)return;
+    if(cooF&&(SUPCOORD?.[a.supervisor]||'')!==cooF)return;
+    set[l.agente_id]=l.agentes.nombre;
+  });
+  fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((x,y)=>x[1].localeCompare(y[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');
+  fa.value=(cur!==''&&set[cur]!==undefined)?cur:'';
+}
 $('filterAgente').addEventListener('change',refrescar);
-['fSup','fCentro','fCoord'].forEach(id=>{const s=$(id);if(s)s.addEventListener('change',render);});
+['fSup','fCentro','fCoord'].forEach(id=>{const s=$(id);if(s)s.addEventListener('change',()=>{poblarFiltroAgente();render();});});
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('dTel').value&&!$('dNombre').value)cerrarDrawer();});
 
