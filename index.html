@@ -1765,7 +1765,22 @@ async function cargarSelectsAsignar(){
   const {data:mr}=await db.from('motivos_rechazo').select('id,nombre').order('orden');
   MOTIVOS_MAP={};(mr||[]).forEach(m=>MOTIVOS_MAP[norm(m.nombre)]=m.id);
 }
-function leerExcel(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});const ws=wb.Sheets[wb.SheetNames[0]];res(XLSX.utils.sheet_to_json(ws,{header:1,defval:''}));}catch(err){rej(err);}};r.onerror=rej;r.readAsArrayBuffer(file);});}
+function elegirHojaConDatos(wb){
+  // Busca en TODAS las hojas la que traiga encabezados de carga (Teléfono + Agente/Campaña);
+  // ignora hojas ajenas (tablas dinámicas, catálogos). Si ninguna califica, cae a la primera.
+  let primera=null;
+  for(const nm of wb.SheetNames){
+    let rows;try{rows=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,defval:''});}catch(e){continue;}
+    if(primera===null)primera=rows;
+    for(let i=0;i<Math.min(rows.length,10);i++){
+      const H=(rows[i]||[]).map(x=>norm(x));
+      const it=H.findIndex(h=>h.includes('telefono')),ia=H.findIndex(h=>h.includes('agente')),ic=H.findIndex(h=>h.includes('campa'));
+      if(it>=0&&(ia>=0||ic>=0)&&it!==ia&&it!==ic)return rows;
+    }
+  }
+  return primera||[];
+}
+function leerExcel(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});res(elegirHojaConDatos(wb));}catch(err){rej(err);}};r.onerror=rej;r.readAsArrayBuffer(file);});}
 function mapearColumnas(rows){
   let hi=-1;
   for(let i=0;i<Math.min(rows.length,10);i++){const H=rows[i].map(x=>norm(x));const it=H.findIndex(h=>h.includes('telefono')),ic=H.findIndex(h=>h.includes('campa')),ia=H.findIndex(h=>h.includes('agente'));if(it>=0&&(ic>=0||ia>=0)&&it!==ic&&it!==ia){hi=i;break;}}
