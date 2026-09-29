@@ -469,7 +469,9 @@ tbody tr:hover{background:#F7F8FF}
     <div class="sec" id="secRegistro">
       <div class="sec-title"><span class="n">1</span>Registro</div>
       <div class="field"><label>Campaña</label><select id="dCampana"><option value="">Selecciona…</option></select><div id="dCampAuto" class="hint hidden" style="font-size:11.5px;margin-top:4px;color:#065F46">📡 Campaña detectada del envío — asignada automáticamente</div></div>
-      <div class="field hidden" id="dAgenteW"><label>👤 Asignado a (reasignar)</label><select id="dAgente"></select><div class="hint" style="font-size:11.5px">Al guardar, el lead pasa a la cartera del agente elegido con todo su historial.</div></div>
+      <div class="field hidden" id="dAgenteW"><label>👤 Asignado a (reasignar)</label><select id="dAgente"></select>
+        <button type="button" id="btnSoloReasignar" class="btn" style="margin-top:6px;width:100%;background:#EDE9FE;color:#5B21B6;font-weight:700">🔁 Solo reasignar (sin tocar lo demás)</button>
+        <div class="hint" style="font-size:11.5px">El botón morado solo cambia el dueño — nombre, viabilidad y etapa los llena el agente que lo recibe. Guardar (abajo) sigue haciendo el cambio completo.</div></div>
       <div class="row2">
         <div class="field"><label>Teléfono</label><input id="dTel" type="text" placeholder="Pega de iVentas (+521…) o 10 dígitos"><div class="hint" id="dTelHint"></div></div>
         <div class="field"><label>Nombre del cliente</label><input id="dNombre" type="text" placeholder="Nombre y apellido"></div>
@@ -5295,6 +5297,22 @@ function poblarFiltroAgente(){
   fa.innerHTML='<option value="">Todos los agentes</option>'+Object.entries(set).sort((x,y)=>x[1].localeCompare(y[1])).map(([id,n])=>`<option value="${id}">${n}</option>`).join('');
   fa.value=(cur!==''&&set[cur]!==undefined)?cur:'';
 }
+async function soloReasignar(){
+  if(!editId)return;
+  const sel=$('dAgente');
+  const nvo=parseInt(sel.value), ori=parseInt(sel.dataset.original||'0');
+  if(!nvo||nvo===ori)return toast('Elige un agente distinto en el selector',false);
+  const b=$('btnSoloReasignar');b.disabled=true;b.textContent='Reasignando…';
+  const deNom=sel.dataset.originalNombre||'otro agente';
+  const aNom=(AGPORID?.[nvo]?.nombre)||sel.options[sel.selectedIndex]?.text||'agente';
+  const {error}=await db.from('leads').update({agente_id:nvo,heredado_de:deNom,heredado_en:new Date().toISOString()}).eq('id',editId);
+  b.disabled=false;b.textContent='🔁 Solo reasignar (sin tocar lo demás)';
+  if(error)return toast('No se pudo reasignar: '+error.message,false);
+  try{await db.from('lead_notas').insert({lead_id:editId,agente_id:AGENTE.id,nota:'🔁 Reasignado de '+deNom+' a '+aNom+' por dirección (reasignación exprés).'});}catch(e){}
+  toast('🔁 Reasignado a '+aNom);
+  cerrarDrawer();await cargarLeads();
+}
+$('btnSoloReasignar').addEventListener('click',soloReasignar);
 $('filterAgente').addEventListener('change',refrescar);
 ['fSup','fCentro','fCoord'].forEach(id=>{const s=$(id);if(s)s.addEventListener('change',()=>{poblarFiltroAgente();render();});});
 $('dTel').addEventListener('input',e=>{const t=tel10(e.target.value);$('dTelHint').innerHTML=t.length===10?('<span class="telok">✓ Número detectado: '+t+'</span>'):'Pega el número de iVentas — tomaré los últimos 10 dígitos.';});
