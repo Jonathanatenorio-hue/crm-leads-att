@@ -2239,8 +2239,10 @@ async function renderDashboard(){
       const esDir=AGENTE.rol==='director';
       if(!esDir&&AGENTE.rol!=='coordinador')return '';
       const misSupsC=AGENTE.rol==='coordinador'?Object.keys(SUPCOORD||{}).filter(s=>SUPCOORD[s]===AGENTE.nombre):null;
-      const act=Object.values(AGPORID||{}).filter(a=>a.rol==='agente'&&a.activo&&(esDir||(misSupsC&&misSupsC.length?misSupsC.includes(a.supervisor):a.centro===AGENTE.centro)));
-      if(!act.length)return '';
+      const todos=Object.values(AGPORID||{}).filter(a=>a.rol==='agente'&&a.activo&&(esDir||(misSupsC&&misSupsC.length?misSupsC.includes(a.supervisor):a.centro===AGENTE.centro)));
+      const act=todos.filter(a=>a.centro!=='CDMX');           // licencias iVentas = solo Puebla
+      const cdmx=esDir?todos.filter(a=>a.centro==='CDMX'):[];  // piloto CDMX, renglón aparte
+      if(!todos.length)return '';
       const porSup={};act.forEach(a=>{const s=a.supervisor||'Sin supervisor';porSup[s]=(porSup[s]||0)+1;});
       const porCoord={};Object.entries(porSup).forEach(([s,n])=>{const c=SUPCOORD[s]||'—';(porCoord[c]=porCoord[c]||[]).push(s+' '+n);});
       const disp=LIC-act.length;
@@ -2251,6 +2253,7 @@ async function renderDashboard(){
         </div>
         <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">
           ${Object.entries(porCoord).sort().map(([c,sups])=>`<div><b>${c}</b>: ${sups.sort().join(' · ')}</div>`).join('')}
+          ${cdmx.length?`<div style="margin-top:4px;padding-top:6px;border-top:1px dashed var(--line,#E5E7EB)"><b>🏙 CDMX (piloto, fuera de licencias)</b>: ${cdmx.length} — ${cdmx.map(a=>a.nombre).sort().join(' · ')}</div>`:''}
         </div>
       </div>`;
     }catch(e){return '';}})()}
@@ -2260,6 +2263,14 @@ async function renderDashboard(){
         <select id="embCamp" style="min-width:220px"><option value="">🌎 Vista global (todas las campañas)</option></select>
       </div>
       <div id="embudoBaseWrap" style="margin-top:12px;overflow-x:auto"></div>
+    </div>`:''}
+    ${['director','coordinador'].includes(AGENTE.rol)?`<div class="dash-card" style="margin-top:16px"><h3>📅 Ventas por mes</h3>
+      <div class="dc-sub">Cierres por mes calendario (fecha real de venta). Agrupa por total, centro o coordinación.</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+        <select id="vmAgrup"><option value="total">Total</option><option value="centro">Por centro</option><option value="coord">Por coordinación</option></select>
+      </div>
+      <div style="margin-top:12px;max-width:860px"><canvas id="vmChart" height="110"></canvas></div>
+      <div id="vmTabla" style="margin-top:12px;overflow-x:auto"></div>
     </div>`:''}
     ${AGENTE.rol==='director'?`<div class="dash-card" style="margin-top:16px"><h3>🧾 Conciliador de ventas · reporte oficial</h3>
       <div class="dc-sub">Sube el reporte oficial (Excel con folio y agente) y se cruza contra las ventas tipificadas en el CRM: coincidencias, sospechosas, faltantes y atribuciones cruzadas.</div>
@@ -2312,6 +2323,7 @@ async function renderDashboard(){
   const _br=$('btnReciclar');if(_br)_br.onclick=reciclar;
   const _rg=$('btnRepGen');if(_rg)_rg.onclick=generarRepFechas;
   try{wireEmbudoBase();}catch(e){}
+  try{wireVentasMes();}catch(e){}
   const _cc=$('btnConciliar');if(_cc)_cc.onclick=conciliarVentas;
   if(CONC_HTML&&$('concOut')&&!$('concOut').innerHTML){
     $('concOut').innerHTML=CONC_HTML;
@@ -3065,6 +3077,46 @@ async function resolverPendConc(id){
   toast('Pendiente marcado como resuelto');
   cargarPendConc();
 }
+let VM_CHART=null;
+function renderVentasMes(){
+  const cv=$('vmChart');if(!cv)return;
+  const modo=$('vmAgrup')?$('vmAgrup').value:'total';
+  const grupoDe=l=>{
+    if(modo==='total')return 'Ventas';
+    const a=AGPORID?.[l.agente_id];
+    if(modo==='centro')return a?.centro||'—';
+    return SUPCOORD?.[a?.supervisor]||'—';
+  };
+  const D={},G=new Set();
+  LEADS.forEach(l=>{
+    if(l.etapa!=='Venta exitosa'||!l.fecha_venta)return;
+    const m=diaLocal(l.fecha_venta).slice(0,7),g=grupoDe(l);
+    G.add(g);(D[m]=D[m]||{})[g]=(D[m][g]||0)+1;
+  });
+  const meses=Object.keys(D).sort();
+  if(!meses.length){$('vmTabla').innerHTML='<div class="dash-empty">Aún sin ventas con fecha.</div>';return;}
+  const grupos=[...G].sort();
+  const MESN=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const eti=meses.map(m=>MESN[parseInt(m.slice(5,7))-1]+'-'+m.slice(2,4));
+  const PAL={'Ventas':'#4F46E5','CC2':'#EC4899','JV':'#0EA5E9','Eduardo':'#F59E0B','Guillermina':'#10B981','Luisa':'#6366F1','—':'#9CA3AF'};
+  const ds=grupos.map((g,i)=>({label:g,data:meses.map(m=>D[m][g]||0),backgroundColor:PAL[g]||['#8B5CF6','#14B8A6','#F97316'][i%3],borderRadius:5}));
+  if(VM_CHART){try{VM_CHART.destroy();}catch(e){}}
+  try{VM_CHART=new Chart(cv,{type:'bar',data:{labels:eti,datasets:ds},options:{responsive:true,plugins:{legend:{display:grupos.length>1,position:'top'}},scales:{x:{stacked:modo!=='total'&&grupos.length>1?false:false},y:{beginAtZero:true,ticks:{precision:0}}}}});}catch(e){}
+  // tabla: meses × grupos + totales
+  let h='<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr><th style="text-align:left;padding:7px 10px;border-bottom:2px solid var(--line,#E5E7EB)">Mes</th>'+grupos.map(g=>'<th style="text-align:center;padding:7px 10px;border-bottom:2px solid var(--line,#E5E7EB)">'+g+'</th>').join('')+(grupos.length>1?'<th style="text-align:center;padding:7px 10px;border-bottom:2px solid var(--line,#E5E7EB)">Total</th>':'')+'</tr></thead><tbody>';
+  const totG={};let totT=0;
+  meses.forEach((m,i)=>{
+    let tm=0;
+    h+='<tr><td style="padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-weight:600">'+eti[i]+'</td>';
+    grupos.forEach(g=>{const v=D[m][g]||0;tm+=v;totG[g]=(totG[g]||0)+v;h+='<td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB)">'+(v||'—')+'</td>';});
+    totT+=tm;
+    if(grupos.length>1)h+='<td style="text-align:center;padding:6px 10px;border-bottom:1px solid var(--line,#E5E7EB);font-weight:700">'+tm+'</td>';
+    h+='</tr>';
+  });
+  h+='<tr><td style="padding:7px 10px;font-weight:800">TOTAL</td>'+grupos.map(g=>'<td style="text-align:center;padding:7px 10px;font-weight:800">'+(totG[g]||0)+'</td>').join('')+(grupos.length>1?'<td style="text-align:center;padding:7px 10px;font-weight:800">'+totT+'</td>':'')+'</tr></tbody></table>';
+  $('vmTabla').innerHTML=h;
+}
+function wireVentasMes(){const s=$('vmAgrup');if(!s)return;s.onchange=renderVentasMes;renderVentasMes();}
 function wireEmbudoBase(){
   const s=$('embCamp');if(!s)return;
   const val=s.value;
