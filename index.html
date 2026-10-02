@@ -1380,15 +1380,19 @@ function abrirDrawer(lead){
   const _dc=$('drCotsList');if(_dc)_dc.innerHTML='';
   if(lead)cargarCotsLead(lead.id);
   hide($('dAgenteW'));
-  if(lead&&AGENTE.rol==='director'){
+  if(lead&&['director','supervisor'].includes(AGENTE.rol)){
     (async()=>{
       try{
         if(!window.REAS_AGS){
-          const {data}=await db.from('agentes').select('id,nombre').eq('activo',true).eq('rol','agente').order('nombre');
+          const {data}=await db.from('agentes').select('id,nombre,supervisores(nombre)').eq('activo',true).in('rol',['agente','supervisor']).order('nombre');
           window.REAS_AGS=data||[];
         }
+        // Supervisor: solo su célula (él mismo + agentes de su plaza). Director: todos.
+        const mios=AGENTE.rol==='supervisor'
+          ? window.REAS_AGS.filter(a=>a.id===AGENTE.id||(a.supervisores&&a.supervisores.nombre===AGENTE.nombre))
+          : window.REAS_AGS;
         const sel=$('dAgente');
-        sel.innerHTML=window.REAS_AGS.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
+        sel.innerHTML=mios.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
         if(![...sel.options].some(op=>+op.value===lead.agente_id))
           sel.innerHTML=`<option value="${lead.agente_id}">${lead.agentes?.nombre||'(actual)'}</option>`+sel.innerHTML;
         sel.value=String(lead.agente_id);
@@ -1551,7 +1555,7 @@ async function guardar(){
   o.proximo_contacto_nota=$('pcNota').value.trim()||null;
   if(st.padreId)o.lead_padre_id=st.padreId;
   let _reasig=null;
-  if(editId&&AGENTE.rol==='director'&&!$('dAgenteW').classList.contains('hidden')){
+  if(editId&&['director','supervisor'].includes(AGENTE.rol)&&!$('dAgenteW').classList.contains('hidden')){
     const _nvo=parseInt($('dAgente').value), _ori=parseInt($('dAgente').dataset.original||'0');
     if(_nvo&&_ori&&_nvo!==_ori){
       o.agente_id=_nvo;
@@ -1759,7 +1763,7 @@ function diaLocal(ts){if(!ts)return '';const s=String(ts);if(/^\d{4}-\d{2}-\d{2}
 function norm(s){return (s||'').toString().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');}
 function fechaISO(v){if(!v)return null;if(v instanceof Date)return v.toISOString().slice(0,10);const s=String(v).trim();const m=s.match(/(\d{4})-(\d{2})-(\d{2})/);if(m)return m[0];const d=new Date(s);return isNaN(d)?null:d.toISOString().slice(0,10);}
 async function cargarSelectsAsignar(){
-  const {data:ags}=await db.from('agentes').select('id,nombre,nombre_completo').eq('rol','agente').eq('activo',true);
+  const {data:ags}=await db.from('agentes').select('id,nombre,nombre_completo').in('rol',['agente','supervisor']).eq('activo',true);
   AGENTES_LISTA=(ags||[]).map(a=>({id:a.id,nombre:a.nombre,n:norm(a.nombre),nc:norm(a.nombre_completo||'')}));
   AGENTES_MAP={};AGENTES_LISTA.forEach(a=>{AGENTES_MAP[a.n]=a.id;if(a.nc)AGENTES_MAP[a.nc]=a.id;});
   CAMP_MAP={};CAMPANAS.forEach(c=>CAMP_MAP[norm(c.nombre)]=c.id);
